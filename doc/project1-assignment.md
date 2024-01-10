@@ -1,28 +1,17 @@
----
-header-includes: |
-  # Project 1: Bootup Mechanism
-
-  INF-2201: Operating Systems Fundamentals,
-  Spring 2024,
-  UiT The Arctic University of Norway
-title: "Project 1: Bootup Mechanism"
----
-
 # Project 1: Bootup Mechanism
 
 INF-2201: Operating Systems Fundamentals,
 Spring 2024,
 UiT The Arctic University of Norway
 
-
-- [Demo Project](#demo-project)
-- [Important Source Files](#important-source-files)
-  - [Hints for bootblock.S](#hints-for-bootblock.s)
-  - [Hints for createimage.c](#hints-for-createimage.c)
-- [Low-level Details](#low-level-details)
-  - [Display memory](#display-memory)
-  - [BIOS Int 0x13 Function 2](#bios-int-0x13-function-2)
-  - [BIOS Int 0x10 Function 0x0e](#bios-int-0x10-function-0x0e)
+  - [Demo Project](#demo-project)
+  - [Important Source Files](#important-source-files)
+      - [Hints for bootblock.S](#hints-for-bootblock.s)
+      - [Hints for createimage.c](#hints-for-createimage.c)
+  - [Low-level Details](#low-level-details)
+      - [Display memory](#display-memory)
+      - [BIOS Int 0x13 Function 2](#bios-int-0x13-function-2)
+      - [BIOS Int 0x10 Function 0x0e](#bios-int-0x10-function-0x0e)
 
 # Demo Project
 
@@ -55,7 +44,6 @@ The bootblock and createimage from this assignment will be used
 throughout the semester.
 
 # Important Source Files
-
 
     src/
     |-- boot/
@@ -106,23 +94,23 @@ with BIOS (described below).
 
 Useful information and documentation:
 
-- Appendix A in Computer Organization and Design by Patterson & Hennessy
-  describes how the linker and loader works.
+  - Appendix A in Computer Organization and Design by Patterson &
+    Hennessy describes how the linker and loader works.
 
-- [Intel® 64 and IA-32 Architectures Software Developer
-  Manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
-  The reference for all things x86 assembler. Get all the software
-  developers manuals (Volume 1-3). Note that Intel documents use the
-  intel assembler syntax, whereas you use the AT&T assembler syntax.
+  - [Intel® 64 and IA-32 Architectures Software Developer
+    Manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
+    The reference for all things x86 assembler. Get all the software
+    developers manuals (Volume 1-3). Note that Intel documents use the
+    intel assembler syntax, whereas you use the AT\&T assembler syntax.
 
-- [A Guide to Programming Pentium/Pentium Pro
-  Processors](doc/x86/pentium-programming-kai-lee.pdf). A good
-  introduction to get you started (or refreshed) on assembler. Covers
-  both Intel and AT&T syntax.
+  - [A Guide to Programming Pentium/Pentium Pro
+    Processors](doc/x86/pentium-programming-kai-lee.pdf). A good
+    introduction to get you started (or refreshed) on assembler. Covers
+    both Intel and AT\&T syntax.
 
-- [x86 Assembly
-  Guide](https://flint.cs.yale.edu/cs421/papers/x86-asm/asm.html).
-  Basics of 32-bit x86 assembly language programming.
+  - [x86 Assembly
+    Guide](https://flint.cs.yale.edu/cs421/papers/x86-asm/asm.html).
+    Basics of 32-bit x86 assembly language programming.
 
 ## Hints for createimage.c
 
@@ -132,9 +120,9 @@ You can ignore the “-vm” option for this project.
 
 You should read the man pages of:
 
-- [createimage](doc/createimage-man-page.md)
-- od(1)
-- objdump(1)
+  - [createimage](doc/createimage-man-page.md)
+  - od(1)
+  - objdump(1)
 
 In addition, [Executable and Linkable Format
 (ELF)](doc/abi/tool-interface-standard-elf-v1.1.pdf) has more
