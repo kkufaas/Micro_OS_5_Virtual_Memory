@@ -1,0 +1,120 @@
+---
+# Prefered C style for new development (2023 going forward)
+#
+# Based mostly on the Linux Kernel coding style
+#
+#   https://www.kernel.org/doc/html/latest/process/coding-style.html
+#
+
+# LLVM is the clang-supported base template that gets us closest
+BasedOnStyle: LLVM
+
+
+## Indentation and text width
+
+# Use a modern 4-column indentation without hard tabs.
+#
+# I appreciate the arguments in the Linux style guide, but I just can't get
+# used to the look of 8-column hard tabs, especially when the editor shows tab
+# chars. I imagine that students will be more used to 4-space indent as well.
+# ---Mike
+#
+IndentWidth: 4
+ContinuationIndentWidth: 8
+UseTab: Never
+
+# The classic: 80 columns, with column 80 itself as a "gutter"
+ColumnLimit: 79
+
+# More indent tweaks
+IndentCaseLabels: false
+
+
+## Braces
+
+# Linux style
+#
+# - the brace to open a function is on a new line
+# - others opening braces are on the same line
+#
+BreakBeforeBraces: Linux
+
+
+## Includes
+
+SortIncludes:    CaseSensitive
+IncludeBlocks:   Regroup
+IncludeIsMainRegex: '(_[a-zA-Z0-9_]+)?$'
+IncludeCategories:
+  # --- Priority 0 is always the "main" header: e.g. kernel.h for kernel.c ---
+
+  # Freestanding standard headers (provided by the compiler itself)
+  - Regex:  '^<(limits|float|iso646|stdalign|stdarg|stdatomic|stdbool|stddef|stdint|stdnoreturn)\.h>$'
+    Priority: 10
+
+  # Hosted standard headers (our libc implementation)
+  - Regex:  '^[<"](assert|ctype|errno|string|stdlib|stdio)\.h[">]$'
+    Priority: 10
+    SortPriority: 20
+
+  # POSIX system call headers (our syscall library)
+  - Regex:  '^[<"](unistd|sys/.*)\.h[">]$'
+    Priority: 20
+    SortPriority: 30
+
+  # Other <> angle bracket includes
+  - Regex:  '^<.*>$'
+    Priority: 40
+
+  # Other "" quote includes
+  - Regex:  '^".*"$'
+    Priority: 50
+
+
+## Alignment
+
+# Align many types of statements if they appear consectutively.
+# As much as it messes up diffs, I love the neatness of it. ---Mike
+AlignConsecutiveMacros:       Consecutive
+AlignConsecutiveAssignments:  Consecutive
+AlignConsecutiveBitFields:    Consecutive
+AlignConsecutiveDeclarations: Consecutive
+
+#AlignArrayOfStructures: Left     # This feature seems buggy, disable for now
+
+# Aligned backslashes (in e.g. multi-line macros) look great but they fall
+# apart easily and then they look terrible.
+AlignEscapedNewlines:   DontAlign
+
+
+## Compressing short constructs
+
+# Allow for functions, but not ifs/blocks/loops
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+
+
+## Breaking long constructs
+
+# Function params/args that don't fit on one line
+AlignAfterOpenBracket: BlockIndent
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+
+# Strings that don't fit on one line
+AlwaysBreakBeforeMultilineStrings: true
+
+# Expressions that don't fit on one line:
+#   put operators on next line and align them
+BreakBeforeBinaryOperators: NonAssignment
+
+
+## Other style choices
+
+#BreakAfterAttributes: Always   # Requires newer clang-format version
+SpaceAfterCStyleCast: true
+...

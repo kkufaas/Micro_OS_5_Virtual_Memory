@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Script to build a Docker image + container and run a command in it,
+# all at once.
+
+IMAGE_TAG="inf2201/os_build:tmp"
+TARGET_DIR="/mnt/mapped_dir"
+
+# Arguments check
+if [ $# == 0 -o "$1" == "-h" -o "$1" == "--help" ]; then
+    SCRIPT_NAME="$(basename $0)"
+    cat >&2 <<-END_USAGE
+USAGE:
+
+    $SCRIPT_NAME <cmd> [arg]...
+
+DESCRIPTION:
+
+    Runs the given <cmd> in a container built from Dockerfile, all in one go.
+    More specifically:
+
+        1. Builds a Docker image from the given <Dockerfile>
+        2. Creates an ephemeral container from that image
+        2. Maps the current directory into the container (as '$TARGET_DIR')
+        3. Runs the given command (<cmd> [arg]...) in the container,
+            in the mapped directory, as the current user.
+        4. Deletes the ephemeral container
+
+    The image will remain behind, with the following tag:
+
+        $IMAGE_TAG
+
+    If this script is run again with a different Dockerfile, the tag will be
+    moved to the new image. Previous images will be left untagged and dangling,
+    and they will be cleaned up during a 'docker image prune' operation. To
+    also remove the most recently built image, remove the tag:
+
+        docker image rm $IMAGE_TAG
+        docker image prune
+
+    If previous images are not cleaned up, then they are effectively cached.
+    Then if this script is run again with a previous Dockerfile, the cached
+    image will be used.
+
+    Because this specific image tag is reused every time this script is run, it
+    is not safe to run multiple instances of this script in parallel.
+
+EXAMPLE:
+
+    # Build the OS image
+    $SCRIPTNAME make
+
+END_USAGE
+    exit 1
+fi
+
+# Arguments parsing
+#
+# Use the first argument as the Dockerfile, then 'shift' the first argument
+# out, leaving the rest ($@) to be used as the command to run and its
+# arguements.
+DOCKERFILE="Dockerfile"
+
+# Build image
+#
+#   -t "$IMAGE_TAG"     sets the image tag
+#   - < "$DOCKERFILE"   uses the given Docker file with no "context" directory
+#
+# See:
+#   https://docs.docker.com/engine/reference/commandline/build/#text-files
+docker build -t "$IMAGE_TAG" - < "$DOCKERFILE" || exit 1
+
+# Create an ephemeral container from that image
+# and run the command in it
+#
+# create args:
+#   -it                     (i)nteractive + (t)ty
+#   -v $PWD:$TARGET_DIR     Map current directory into the container
+#   -w $TARGET_DIR          Use mapped directory as working directory
+#   -u $UID                 Set user ID so that created files belong to
+#                               current user, instead of root
+# run args:
+#   --rm                    Remove ephemeral container after running command
+#   "$@"                    The <cmd> and [args] passed to this script
+#
+# See:
+#   https://docs.docker.com/engine/reference/commandline/run/
+docker run \
+    -it --rm \
+    -v "$PWD:$TARGET_DIR" \
+    -w "$TARGET_DIR" \
+    -u $UID \
+    "$IMAGE_TAG" \
+    "$@"

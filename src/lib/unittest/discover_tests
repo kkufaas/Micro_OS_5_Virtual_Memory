@@ -1,0 +1,61 @@
+#!/bin/bash
+
+TEST_PREFIX="test_"
+OBJS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prefix)
+            shift
+            TEST_PREFIX="$1"
+            ;;
+        *)
+            OBJS+=("$1")
+            ;;
+    esac
+    shift
+done
+
+function extract_test_symbols {
+    local type="$1"; shift
+    nm --format bsd "$@" \
+        | grep " $type " \
+        | cut -d' ' -f3 \
+        | grep "^$TEST_PREFIX"
+}
+
+localfns=( $(extract_test_symbols t "${OBJS[@]}") )
+testfns=( $(extract_test_symbols T "${OBJS[@]}") )
+
+for localfn in "${localfns[@]}"; do
+    printf >&2 'local symbol (static fn) is ignored: %s\n' "$localfn"
+done
+
+cat <<EOF
+/*
+ * GENERATED FILE. DO NOT EDIT.
+ *
+ * This file is for use with libunittest.
+ * It lists test functions discovered in the following objects:
+ *      ${OBJS[@]}
+ *
+ * If this file is compiled and linked into an executable with libunittest,
+ * libunittest will provide a main() function that will run these discovered
+ * test functions (if no other main function is found while linking).
+ */
+#include <stddef.h>
+#include <unittest/unittest.h>
+
+/* Forward-declare all discovered test functions */
+$(for testfn in "${testfns[@]}"; do \
+    printf 'extern testfn %s;\n' "$testfn"; \
+done)
+
+/* Null-terminated list of discovered test functions */
+testfn *discovered_tests[] = {
+$(for testfn in "${testfns[@]}"; do \
+    printf '\t%s,\n' "$testfn"; \
+done)
+	NULL,
+};
+EOF

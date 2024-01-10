@@ -1,0 +1,303 @@
+# Major Targets
+# ======================================================================
+# "Phony" targets are targets that are not themselves files. Instead, they are
+# shorthand for common tasks. Here are the major tasks defined in this file:
+
+.PHONY: all		# Default: build typical files
+.PHONY: test		# Run automated tests
+.PHONY: clean		# Remove most generated files
+.PHONY: distclean	# Remove all non-source files
+
+# Put the 'all' target first so that it becomes the default
+all:
+
+# Search paths
+# ======================================================================
+# This file is meant to be included by the host/Makefile and target/Makefile.
+# The rules here will output to those subdirectories. However, we will set up
+# Make to search in the source directory for source files. So, for example,
+# with the built-in rule for buliding object files from C files...
+#
+#	%.o: %.c
+#		$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+#
+#	This rule will match		kernel/kernel.o: kernel/kernel.c
+#	It will find the source file	$(SRC)/kernel/kernel.c
+#	And build the object file	host/kernel/kernel.o
+#	or				target/kernel/kernel.o
+#	depending one whether it is host/Makefile or target/Makefile
+#	that invokes the rule.
+# 
+
+# Check SRC variable
+#
+# When this file is included by one of the subdirectory Makefiles, the current
+# working directory will be that file's subdirectory (host/ or target/).
+# By default paths will be relative to that subdirectory, especially output
+# paths.
+#
+# That Makefile should set the SRC variable to tell us where to find sources.
+#
+ifndef SRC
+$(error SRC variable not set)
+endif
+
+# Tell Make to search for source files in the SRC directory.
+#
+# Example: A dependency like
+#		kernel/kernel.o: kernel/kernel.c
+#	Will build	(cwd)/kernel/kernel.o
+#	from		$(SRC)/kernel/kernel.c
+#
+vpath	%.c	$(SRC)
+vpath	%.h	$(SRC)
+vpath	%.S	$(SRC)
+
+# Tell Make to search for libraries in the output lib directory.
+#
+# Example: A dependency specified like a linker flag
+#		kernel/kernel: -lc
+#	Will link	(cwd)/kernel/kernel
+#	with the lib	(cwd)/lib/libc.a
+#
+vpath	lib%.a	lib
+LDFLAGS += -L lib
+
+# Tell the C preprocessor to look for system headers (#include <...>) in the
+# source lib directory.
+#
+# Example: An include like
+#		#include <unittest/unittest.h>
+#	Will find the header	$(SRC)/lib/unittest/unittest.h
+#
+CPPFLAGS += -isystem $(SRC)/lib
+
+# Function: Search source directory for files and give their object names
+#
+# $(1): source subdirectory directory to search
+# $(2): basename pattern to search for
+#
+# Example: a Make directive like
+#		KERNEL_OBJS := $(call dirobjs,kernel/,*)
+#	Will find
+#		$(SRC)/kernel/kernel.c
+#		$(SRC)/kernel/kernel_start.S
+#		...and so on.
+#	And the KERNEL_OBJS will be set with the corresponding object files:
+#		kernel/kernel.o
+#		kernel/kernel_start.o
+#		...and so on.
+#
+define dirobjs
+$(patsubst $(SRC)/%,%,\
+$(patsubst %.c,%.o,\
+$(patsubst %.S,%.o,\
+$(patsubst %.s,%.o,\
+$(shell find $(SRC)/$(1) -name '$(2).[csS]') ))))
+endef
+
+# Common compiler flags for both host and target environments
+# ======================================================================
+
+# Preprocessor options
+CPPFLAGS += -D LOGLEVEL=LOG_DEBUG#	Set kernel log output to debug level
+#CPPFLAGS += -D LOGLEVEL=LOG_INFO#	Set kernel log output to info level
+
+# Warnings
+CFLAGS += -Wall#		Warn on just about everything
+CFLAGS += -Wextra#		Even more warnings
+CFLAGS += -Wno-unused#		Skip warnings for unused code
+
+# Debugging
+CFLAGS += -g#			Include debug metadata
+
+# Optimization
+CFLAGS += -Og#			Optimize with debugging in mind
+CFLAGS += -fno-defer-pop#	Pop fn arguments after call
+
+# Linking
+LDFLAGS += -Wl,--trace#		Show what files and libs are included in link
+
+# Compiling
+# ======================================================================
+# Make has built-in rules for compiling C programs. We will mostly just use
+# those.
+#
+# See the manual:
+# <https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html>
+#
+# ...or run 'make --print-data-base' in an empty directory to see exactly what
+# your version of Make is working with.
+
+# The libraries are not fully disentangled from the kernel yet, so we need
+# to let them load some kernel headers.
+# TODO: Remove library dependencies on kernel headers.
+CPPFLAGS += -isystem $(SRC)
+
+# Rule to assemble an assembly file with C Preprocessing
+#
+# This rule is more detailed than the default assembler rule and includes
+# our C flags and target architecture settings.
+%.o: %.S
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) \
+		-c -x assembler-with-cpp -o $@ $<
+
+# Libraries
+# ======================================================================
+
+# Rule to build a .a library archive from object files
+%.a:
+	ar crs $@ $^
+
+## For target: Our own custom (subset of the) C Standard Library
+lib/libc.a: $(call dirobjs,lib/libc/,*)
+
+# A "core" subset of libc that makes no system calls
+#
+# For inclusion in the kernel and for unit testing.
+LIBC_CORE_OBJS := $(call dirobjs,lib/libc/,*_core*)
+$(LIBC_CORE_OBJS): CPPFLAGS += -D OSLIBC_CORE_ONLY
+$(LIBC_CORE_OBJS): CFLAGS += -ffreestanding
+lib/libc_core.a: $(LIBC_CORE_OBJS)
+
+## For both: Simple ANSI terminal and client
+lib/libansi_term.a: $(call dirobjs,lib/ansi_term,*)
+
+## For both: Non-standard utilities shared by kernel and processes
+lib/libutil.a: $(call dirobjs,lib/util,*)
+
+## For both: A simple unit-testing framework for C
+lib/libunittest.a: $(call dirobjs,lib/unittest,*)
+
+# Rule to discover unit tests in a library.
+# The resulting C file will compile to a program that runs the tests.
+lib/test_lib%.c: lib/lib%.a
+	$(SRC)/lib/unittest/discover_tests $(DISCOVERFLAGS) $< > $@
+
+# Compiling and linking bootblock, kernel, and processes
+# ======================================================================
+
+BOOTBLOCK_OBJS += boot/bootblock.o
+boot/bootblock: $(BOOTBLOCK_OBJS)
+
+KERNEL_OBJS := $(call dirobjs,kernel/,*)
+kernel/kernel: $(KERNEL_OBJS)
+kernel/kernel: -lutil#		Link against our util library
+kernel/kernel: CPPFLAGS += -D OSLIBC_CORE_ONLY
+kernel/kernel: -lc_core#	Link against the core version of libc
+kernel/kernel: -lansi_term#	Link against ANSI terminal
+
+# Export constants from C to assembly
+# ----------------------------------------------------------------------
+# When writing assembly language by hand, you often need constant values
+# that are calculated by the C compiler: enum values, struct offsets, sizes of
+# types, etc.
+#
+# To calculate and export these constants, we have a special C file with
+# inline assembly that declares constants:
+#
+#   1. asm-offsets.c	compiles to assembly
+#   2. asm-offsets.s	contains constant definitions plus other generated code
+#   3. asm-offsets.h.s	contains only constant definitions
+#
+# See our asm-offsets.c for more details.
+
+OFFSETS_SEDFLAGS += -n#			turn off auto-print
+OFFSETS_SEDFLAGS += -e '/\.equ/p'#	print only '.equ' lines
+OFFSETS_SEDFLAGS += -e '1i\# GENERATED FILE. DO NOT EDIT.\n'#	add warning
+
+%.s: %.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -S -o $@ $<
+
+%.h.s: %.s
+	sed $(OFFSETS_SEDFLAGS) $< > $(patsubst %.s,%.tmp.s,$<)
+	mv $(patsubst %.s,%.tmp.s,$<) $@
+
+# Correct path for asm-offsets.h.s
+#
+# When generating dependency metadata, the C Preprocessor will not know where
+# asm-offsets.h.s is supposed to go (under kernel/). Therefore, it will
+# generate a dependency on just asm-offsets.h.s, with no subdirectory.
+#
+# In order to get Make to build kernel/asm-offsets.h.s, we tell it to make
+# a symlink.
+asm-offsets.h.s: kernel/asm-offsets.h.s
+	ln -f -s $< $@
+
+.PHONY: clean_asm_offsets
+clean_asm_offsets:
+	$(RM) asm-offsets.h.s kernel/asm-offsets.h.s
+
+# When compiling kernel objects, add the output dir to the include search path,
+# so that includes can find kernel/asm-offsets.h.s .
+$(KERNEL_OBJS): CPPFLAGS += -I kernel
+
+# Cleanup
+# ======================================================================
+
+clean:
+	$(RM) -r boot kernel lib process
+	$(RM) createimage createimage.o
+
+# Utilities
+# ======================================================================
+
+# Generate dependency metadata from source files
+# ----------------------------------------------------------------------
+# We have GCC generate dependency metadata and store it in Makefile format
+# in generated files. The generated files have a '.d' extension:
+#
+#	foo.d	# Dependencies needed for foo.o
+#
+# For example, target/kernel.d might look something like this, based on
+# which headers it actually includes:
+#
+#	target/kernel.o target/kernel.s: kernel.c \
+#	 addrs.h cpu_x86.h cpu.h dispatch.h fs.h block.h fstypes.h \
+#	 interrupt.h kernel.h pcb.h keyboard.h mbox.h sync.h \
+#	 memory.h scheduler.h screen.h time.h usb/scsi.h usb/usb.h \
+
+# Dependency generation rules
+
+DEPFLAGS += -M#		Dependency generation mode (including system files)
+DEPFLAGS += -MG#	Assume that missing headers are generated files
+#	-MT ...		Sets the name of the target in the generated rule
+#	-MF $@		Sets output file name
+
+# Common recipe for dependecy generation rules
+define dep_gen_recipe
+	mkdir -p $(@D)
+	$(CPP) $(DEPFLAGS) $(CPPFLAGS) \
+		-MT $(patsubst %.d,%.o,$@) \
+		-MT $(patsubst %.d,%.s,$@) \
+		-MF $@ $<
+endef
+
+# Rule for generating dependencies from a .c file
+%.d: %.c
+	$(dep_gen_recipe)
+
+# Rule for generating dependencies from a .S assembly file
+%.d: %.S
+	$(dep_gen_recipe)
+
+# Function: Find .c and .S source files and give the corresponding .d names
+define dep_gen_files
+$(patsubst $(SRC)/%,%,\
+$(patsubst %.c,%.d,\
+$(patsubst %.S,%.d,\
+$(shell find $(SRC) \
+	-path '$(SRC)/host/*' -o -path '$(SRC)/target/*' -prune \
+	-o -name '*.[cS]' -print))))
+endef
+
+DEPFILES := $(call dep_gen_files)
+
+# Include generated depedencies (make them if necessary)
+include $(DEPFILES)
+
+# Remove the dependency files on clean
+.PHONY: clean_makefile_cpp_includes
+clean: clean_makefile_cpp_includes
+clean_makefile_cpp_includes:
+	$(RM) $(DEPFILES)

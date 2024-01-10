@@ -1,0 +1,43 @@
+# Output directories
+host/*
+target/*
+
+!host/Makefile
+!target/Makefile
+
+# Object files
+*.o
+*.a
+
+# Dependency files
+*.d
+
+# Compiler generated headers
+asm-offsets.s
+asm-offsets.h.s
+
+# Binaries
+createimage
+image
+
+# serial output
+serial.out
+
+# debug symbols for Bochs
+*.sym
+bochsdebug.out
+
+# Given files
+!given/*
+
+# Simulator
+shell_sim
+image_sim
+p6sh
+
+# Tags
+TAGS
+tags
+
+# clang tooling
+compile_commands.json
