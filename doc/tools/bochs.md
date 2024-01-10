@@ -36,9 +36,13 @@ gdb-support see [GDB](#gdb), for built-in debugger see
 
 **From source**
 
-We will be compiling for the X.org version of bochs (default) so we need
-some X.org development libraries. We recommend the dev libs from xorg:
-`xorg-dev` in apt.
+`Dependencies:`
+
+Bochs uses C++ for some of their build process, so when compiling from
+source we need a C++ compiler\! We recommend the GNU C++ compiler: `g++`
+in apt. We will be compiling for the X.org version of bochs (default) so
+we need some X.org development libraries. We recommend the dev libs from
+xorg: `xorg-dev` in apt.
 
 In the case that this crashes your system, you can try using the SDL
 version instead, see [Bochs
@@ -64,7 +68,7 @@ in [Built-in debugger](#built-in-debugger) or [GDB](#gdb).
 
 For Ubuntu:
 
-    sudo apt update && sudo apt -y upgrade && sudo apt -y autoremove && sudo apt install -y xorg-dev && \
+    sudo apt update && sudo apt -y upgrade && sudo apt -y autoremove && sudo apt install -y xorg-dev && sudo apt install -y g++ && \
     git clone git@github.com:bochs-emu/Bochs.git && \
     cd Bochs/bochs && \
     git checkout REL_2_7_FINAL && \
