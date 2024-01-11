@@ -12,6 +12,7 @@
           - [Break on general protection fault and examine the
             stack](#break-on-general-protection-fault-and-examine-the-stack)
       - [GDB debug](#gdb-debug)
+          - [GDB init file](#gdb-init-file)
           - [16-bit debugging](#bit-debugging)
       - [Known-Good Bochs and BIOS
         Versions](#known-good-bochs-and-bios-versions)
@@ -39,10 +40,11 @@ gdb-support see [GDB](#gdb), for built-in debugger see
 `Dependencies:`
 
 Bochs uses C++ for some of their build process, so when compiling from
-source we need a C++ compiler\! We recommend the GNU C++ compiler: `g++`
+source we need a C++ compiler. We recommend the GNU C++ compiler: `g++`
 in apt. We will be compiling for the X.org version of bochs (default) so
 we need some X.org development libraries. We recommend the dev libs from
-xorg: `xorg-dev` in apt.
+xorg: `xorg-dev` in apt. If your Linux distribution uses X11 instead of
+X.org (e.g. Linux Mint), install `libx11-dev` instead.
 
 In the case that this crashes your system, you can try using the SDL
 version instead, see [Bochs
@@ -139,11 +141,37 @@ The Bochs built-in debugger gives you full control of the emulator and
 execution of your code, which can be extremely useful. It resembles what
 you are used to from GDB, with a slightly more ‘clunky’ feel.
 
+  - Bochs Debugger documentation:
+    <https://bochs.sourceforge.io/doc/docbook/user/internal-debugger.html>
+  - You can also type `help` at the debugger prompt
+
 ### Loading symbols and breaking on functions
 
-    <bochs:1> ldsym "kernel.sym"
-    <bochs:2> lbreak "scheduler"
-    <bochs:3> lbreak "dispatch"
+Bochs can load symbols from files. The files have a simple file format
+with one symbol per line:
+
+    00001000 _start16
+    000015c7 _start32
+    00001003 kernel_main
+
+Our build system can generate these symbol files for you:
+
+``` bash
+make bochssyms      # Just generate symbol files
+make bochsdebug     # Generate symbol files and launch debugger
+
+# These will generate...
+#   target/boot/bootblock.sym   for target/boot/bootblock
+#   target/kernel/kernel.sym    for target/kernel/kernel
+#   ...and so on with any processes that are active for the current project
+```
+
+At the Bochs debugger command line, you can load the symbol files with
+the `ldsym` command:
+
+    <bochs:1> ldsym "target/kernel/kernel.sym"
+    <bochs:2> lbreak "_start16"
+    <bochs:3> lbreak "_start32"
     <bochs:4> continue
 
 ### Displaying data
@@ -164,10 +192,10 @@ you are used to from GDB, with a slightly more ‘clunky’ feel.
 
 ### Break on general protection fault and examine the stack
 
-    ldsym 'out/target/bootblock.sym'
-    ldsym 'out/target/kernel.sym'
-    ldsym 'out/target/process/process1.sym'
-    ldsym 'out/target/process/process2.sym'
+    ldsym 'target/bootblock.sym'
+    ldsym 'target/kernel.sym'
+    ldsym 'target/process/process1.sym'
+    ldsym 'target/process/process2.sym'
     show all
     break 'exception_13'
     continue
@@ -207,6 +235,13 @@ compiling using -g/-Og flags, this should be on by default.
 
 1.  Uncomment the last line in your bochsrc file `gdbstub: enabled=1,
     port=1234, text_base=0, data_base=0, bss_base=0`
+    
+    Or, to enable the GDB stub for just a single invokation of Bochs,
+    add the enable command to Bochs’s command line:
+    
+    ``` 
+     bochs -q "gdbstub: enabled=1"
+    ```
 
 2.  Compile your kernel with debug flags and debug optimization levels.
 
@@ -263,6 +298,49 @@ GDB Docs: [GDB](https://sourceware.org/gdb/current/onlinedocs/gdb.html/)
 
 Bochs Debugger Docs:
 [Built-in](https://bochs.sourceforge.io/doc/docbook/user/internal-debugger.html)
+
+### GDB init file
+
+You can put common GDB commands for this project into a `.gdbinit` file
+in the project directory.
+
+Helpful commands you may want to put in your `.gdbinit`:
+
+    # Use split C + disassembly layout
+    layout split
+    
+    # Kernel as main file
+    file target/kernel/kernel
+    
+    # Additional symbol files
+    add-symbol-file target/process/process1
+    add-symbol-file target/process/process2
+    
+    # Connect to bochs
+    target remote localhost:1234
+    
+    # Always break at kernel startup
+    break _start32
+
+Note that GDB will likely refuse to auto-load your `.gdbinit` file for
+security reasons. To load the file explicitly, `source` the file from
+the debugger command line:
+
+    # At GDB debugger command line
+    source .gdbinit
+
+To enable auto-load, mark the project directory as safe in the
+`~/.gdbinit` file in your home directory:
+
+    # In home directory ~/.gdbinit file
+    add-auto-load-safe-path ~/path/to/project/dir
+
+See:
+
+  - GDB Manual: [Initialization
+    Files](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Initialization-Files.html#Initialization-Files)
+  - GDB Manual: [Security restriction for
+    auto-loading](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Auto_002dloading-safe-path.html)
 
 ### 16-bit debugging
 

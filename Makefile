@@ -55,7 +55,10 @@ image: $(CREATEIMAGE) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)
 	$(CREATEIMAGE) $(CREATEIMAGE_FLAGS) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)
 
 # Create symbol files for Bochs debugging
-bochsdebug: $(addsuffix .sym,$(BOOTBLOCK) $(KERNEL) $(PROCESSES))
+BOCHSSYMS := $(addsuffix .sym,$(BOOTBLOCK) $(KERNEL) $(PROCESSES))
+.PHONY: bochssyms
+bochssyms: $(BOCHSSYMS)
+bochsdebug: $(BOCHSSYMS)
 
 # Unit testing
 # ======================================================================
