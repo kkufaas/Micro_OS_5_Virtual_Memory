@@ -1,18 +1,18 @@
-- [Project 1: Bootup Mechanism](#project-1-bootup-mechanism)
-  - [Assignment](#assignment)
-  - [Provided files](#provided-files)
-  - [Detailed requirements and hints for
-    bootblock.S](#detailed-requirements-and-hints-for-bootblock.s)
-  - [Detailed Requirements and Hints for
-    createimage.c](#detailed-requirements-and-hints-for-createimage.c)
-  - [Design review](#design-review)
-  - [Handin](#handin)
-  - [Low-level Details](#low-level-details)
-    - [Display memory](#display-memory)
-    - [BIOS Int 0x13 Function 2 (From Undocumented
-      PC)](#bios-int-0x13-function-2-from-undocumented-pc)
-    - [BIOS Int 0x10 Function 0x0e (From Undocumented
-      PC)](#bios-int-0x10-function-0x0e-from-undocumented-pc)
+  - [Project 1: Bootup Mechanism](#project-1-bootup-mechanism)
+      - [Assignment](#assignment)
+      - [Provided files](#provided-files)
+      - [Detailed requirements and hints for
+        bootblock.S](#detailed-requirements-and-hints-for-bootblock.s)
+      - [Detailed Requirements and Hints for
+        createimage.c](#detailed-requirements-and-hints-for-createimage.c)
+      - [Design review](#design-review)
+      - [Handin](#handin)
+      - [Low-level Details](#low-level-details)
+          - [Display memory](#display-memory)
+          - [BIOS Int 0x13 Function 2 (From Undocumented
+            PC)](#bios-int-0x13-function-2-from-undocumented-pc)
+          - [BIOS Int 0x10 Function 0x0e (From Undocumented
+            PC)](#bios-int-0x10-function-0x0e-from-undocumented-pc)
 
 # Project 1: Bootup Mechanism
 
@@ -48,16 +48,16 @@ throughout the semester.
 Detailed explanation of each file is provided in the precode. You will
 modify the filenames in **bold** in this assignment.
 
-| File                | Description                                                                                                                                                                |
-|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Makefile            | Simplify building the collection of files into an *image*.                                                                                                                 |
-| bochsrc             | A configuration file for bochs.                                                                                                                                            |
-| **bootblock.S**     | Code for the bootblock of a bootable disk.                                                                                                                                 |
-| bootblock_example.s | Some common programming tricks in assembler. Just a reference code file.                                                                                                   |
-| bootblock.given     | A sample bootblock binary. Use this to test your createimage implementation.                                                                                               |
-| **createimage.c**   | Tool to create a bootable operating system image of the ELF-formated files provided to it. contains a template you can use as a strarting point when completing this tool. |
-| createimage.given   | A working createimage binary. Use this to test your bootblock implementation.                                                                                              |
-| kernel.s            | Kernel code. Contains the *\_start* initial function. Minimal kernel to be loaded by the bootup code.                                                                      |
+| File                 | Description                                                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Makefile             | Simplify building the collection of files into an *image*.                                                                                                                 |
+| bochsrc              | A configuration file for bochs.                                                                                                                                            |
+| **bootblock.S**      | Code for the bootblock of a bootable disk.                                                                                                                                 |
+| bootblock\_example.s | Some common programming tricks in assembler. Just a reference code file.                                                                                                   |
+| bootblock.given      | A sample bootblock binary. Use this to test your createimage implementation.                                                                                               |
+| **createimage.c**    | Tool to create a bootable operating system image of the ELF-formated files provided to it. contains a template you can use as a strarting point when completing this tool. |
+| createimage.given    | A working createimage binary. Use this to test your bootblock implementation.                                                                                              |
+| kernel.s             | Kernel code. Contains the *\_start* initial function. Minimal kernel to be loaded by the bootup code.                                                                      |
 
 ## Detailed requirements and hints for bootblock.S
 
@@ -90,10 +90,10 @@ Developer
 Manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
 The reference for all things x86 assembler. Get all the software
 developers manuals (Volume 1-3). Note that Intel documents use the intel
-assembler syntax, whereas you use the AT&T assembler syntax. - [A Guide
+assembler syntax, whereas you use the AT\&T assembler syntax. - [A Guide
 to Programming Pentium/Pentium Pro Processors](pc-arch.pdf). A good
 introduction to get you started (or refreshed) on assembler. Covers both
-Intel and AT&T syntax. - [x86 Assembly
+Intel and AT\&T syntax. - [x86 Assembly
 Guide](https://flint.cs.yale.edu/cs421/papers/x86-asm/asm.html). Basics
 of 32-bit x86 assembly language programming.
 
@@ -190,4 +190,4 @@ Called with:
 
 Returns:
 
-    character displayed 
+    character displayed
