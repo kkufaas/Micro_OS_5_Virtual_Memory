@@ -79,10 +79,42 @@ Or, to run make in a Docker container, use the `docker-run` script:
 This produces a disk image (filename `image`) that can be booted in an emulator
 or on some old PCs.
 
-To run in the Bochs emulator:
+## Running in the Bochs Emulator
 
-    make run
+The supported emulator is Bochs.
 
-To run in the Bochs emulator's debugger:
+Bochs has an internal debugger and it can also be configured to work with
+GDB. How you run the emulator depends on your configuration.
 
-    make debug
+### Bochs with internal debugger (`apt` default)
+
+Bochs with internal debugger is the default when Bochs is installed from
+`apt`. The Makefile has targets for that:
+
+```bash
+# Run: Launch Bochs and immediately send a 'continue' command to the debugger
+make run
+
+# Debug: Build debug symbol files and launch Bochs with debugger active
+make debug
+```
+
+### Bochs with GDB (requires reinstalling from source)
+
+If you have reconfigured Bochs to use GDB, it is best to ignore the `make
+run` and `make debug` targets and launch GDB in the way that works best for
+your configuration. It might look something like this:
+
+```bash
+# Run: Build, then launch Bochs
+make
+bochs -q
+
+# Debug: Build, launch Bochs with debugger active, and connect GDB
+make
+bochs -q "gdbstub: enabled=1"
+# (in a separate terminal window)
+gdb target/kernel/kernel -ex "target remote localhost:1234"
+```
+
+See [doc/tools/bochs.md](doc/tools/bochs.md) for more information.
