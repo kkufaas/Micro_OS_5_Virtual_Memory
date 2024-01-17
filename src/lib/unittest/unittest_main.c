@@ -2,11 +2,13 @@
 
 #include <stdio.h>
 
+#include <syslib/compiler_compat.h>
+
 #define UNUSED(x) (void) (x) /* suppress unused warning */
 
 extern testfn *discovered_tests[];
 
-__attribute__((weak)) int main(int argc, const char *argv[])
+ATTR_WEAK int main(int argc, const char *argv[])
 {
     const char *progname = argc ? argv[0] : "[unknown test file]";
 

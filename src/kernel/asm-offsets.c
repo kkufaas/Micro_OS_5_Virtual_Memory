@@ -18,6 +18,7 @@
 #include <stddef.h>
 
 #include "kernel.h"
+#include "scheduler.h"
 
 /*
  * Define an assembly constant
@@ -56,5 +57,12 @@ void foo()
 {
     ASM_CONST(KERNEL_CS);
     ASM_CONST(KERNEL_DS);
+
+    ASM_CONST(STATUS_FIRST_TIME);
+    ASM_CONST(STATUS_READY);
+    ASM_CONST(STATUS_BLOCKED);
+    ASM_CONST(STATUS_EXITED);
+
+    ASM_OFFSET(PCB_NEXT, struct pcb, next);
 
 }

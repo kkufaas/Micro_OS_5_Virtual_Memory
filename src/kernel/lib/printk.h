@@ -10,14 +10,15 @@
 #include <stdarg.h>
 
 #include <ansi_term/termbuf.h>
+#include <syslib/compiler_compat.h>
 
 enum log_level {
-    LOG_SILENT = INT_MIN,
-    LOG_ERROR  = 0,
+    LOG_ERROR = 0,
     LOG_DUMP,
     LOG_WARN,
     LOG_INFO,
     LOG_DEBUG,
+    LOG_SKIP, // Print with this log level to never print
 };
 
 #ifndef LOG_LEVEL
@@ -26,8 +27,7 @@ enum log_level {
 
 extern const char *level_strs[];
 
-__attribute__((format(printf, 2, 3))) int
-    kprintf(enum log_level lvl, const char *fmt, ...);
+ATTR_PRINTFLIKE(2, 3) int kprintf(enum log_level lvl, const char *fmt, ...);
 int vkprintf(enum log_level lvl, const char *fmt, va_list args);
 
 /*

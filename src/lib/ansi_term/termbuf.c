@@ -199,19 +199,6 @@ static void execute_ansi_escape(struct term *t)
     }
 }
 
-static void invert_color(const struct term *t, int row, int col)
-{
-    if (is_in_bounds(t, row, col)) {
-        colorchar_t *ptr = term_ptr(t, row, col);
-
-        colorchar_t ch = *ptr & 0x00ff;
-        colorchar_t fg = *ptr & 0x0f00;
-        colorchar_t bg = *ptr & 0xf000;
-
-        *ptr = (fg << 4) | (bg >> 4) | ch;
-    }
-}
-
 static void clear_cursor(struct term *t)
 {
     if (t->cursor_visible) {

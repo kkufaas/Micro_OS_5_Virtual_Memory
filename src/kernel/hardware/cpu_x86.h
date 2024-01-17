@@ -33,8 +33,29 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <syslib/compiler_compat.h>
+
 /* An unsigned integer type with the size of a general-purpose register. */
 typedef uint32_t ureg_t;
+
+/* EFLAGS register */
+#define EFLAGS_CF         (1 << 0)    // Carry Flag
+#define EFLAGS_PF         (1 << 2)    // Parity Flag
+#define EFLAGS_ZF         (1 << 6)    // Zero Flag
+#define EFLAGS_SF         (1 << 7)    // Sign Flag
+#define EFLAGS_TF         (1 << 8)    // Trap Flag
+#define EFLAGS_IF         (1 << 9)    // Interrupt Flag
+#define EFLAGS_DF         (1 << 10)   // Direction Flag
+#define EFLAGS_OF         (1 << 11)   // Overflow Flag
+#define EFLAGS_IOPL       (0x3 << 12) // I/O Privilege Level
+#define EFLAGS_IOPL_SHIFT (12)        // I/O Privilege Level (shift)
+#define EFLAGS_NT         (1 << 14)   // Nested Task
+#define EFLAGS_RF         (1 << 16)   // Resume Flag
+#define EFLAGS_VM         (1 << 17)   // Virtual-8086 Mode
+#define EFLAGS_AC         (1 << 18)   // Alignment Check
+#define EFLAGS_VIF        (1 << 19)   // Virtual Interrupt Flag
+#define EFLAGS_VIP        (1 << 20)   // Virtual Interrupt Flag
+#define EFLAGS_ID         (1 << 21)   // ID Flag
 
 enum x86_privilege_level {
     PL0 = 0, // System privilege level, intended for kernel code
@@ -57,7 +78,7 @@ enum x86_privilege_level {
  * AMD's manual has documentation for all descriptors grouped together in one
  * section, which may be more convenient for comparing.
  */
-struct __attribute__((packed, aligned(8))) descriptor {
+struct ATTR_PACKED ATTR_ALIGNED(8) descriptor {
     uint16_t low_w;   // Segment: limit[15:0], Gate: offset[15:0]
     uint16_t high_w;  // Segment: base[15:0], Gate: segment selector
     uint32_t high_dw; // Segment: base + limit + flags, Gate: offset + flags
@@ -138,7 +159,7 @@ enum descriptor_high_dw_bits {
  *
  * See: Intel, Vol 3, §3.5.1, Segment Descriptor Tables
  */
-struct __attribute__((packed)) pseudo_descriptor {
+struct ATTR_PACKED pseudo_descriptor {
     uint16_t           limit;
     struct descriptor *base_addr;
 };
@@ -260,6 +281,6 @@ decl_out_fn(outl, uint32_t);
 
 /* === Misc === */
 
-static inline void cpu_halt() { asm inline volatile("hlt"); }
+static inline void cpu_halt(void) { asm inline volatile("hlt"); }
 
 #endif /* _CPU_X86_H */

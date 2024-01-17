@@ -42,6 +42,9 @@ ifndef SRC
 $(error SRC variable not set)
 endif
 
+# Strip the source prefix from the __FILE__ macro
+CPPFLAGS += -fmacro-prefix-map="$(SRC)/"=
+
 # Tell Make to search for source files in the SRC directory.
 #
 # Example: A dependency like
@@ -106,7 +109,7 @@ CPPFLAGS += -D LOGLEVEL=LOG_DEBUG#	Set kernel log output to debug level
 # Warnings
 CFLAGS += -Wall#		Warn on just about everything
 CFLAGS += -Wextra#		Even more warnings
-CFLAGS += -Wno-unused#		Skip warnings for unused code
+#CFLAGS += -Wno-unused#		Skip warnings for unused code
 
 # Debugging
 CFLAGS += -g#			Include debug metadata
@@ -160,6 +163,14 @@ $(LIBC_CORE_OBJS): CPPFLAGS += -D OSLIBC_CORE_ONLY
 $(LIBC_CORE_OBJS): CFLAGS += -ffreestanding
 lib/libc_core.a: $(LIBC_CORE_OBJS)
 
+## For target: Our own C runtime start files for processes
+#
+# crt0	- Provides the _start function which runs main
+STARTFILES += lib/startfiles/crt0.o
+
+## For target: A syscall library for processes to call into our kernel
+lib/libsys.a: $(call dirobjs,lib/syslib,*)
+
 ## For both: Simple ANSI terminal and client
 lib/libansi_term.a: $(call dirobjs,lib/ansi_term,*)
 
@@ -186,6 +197,13 @@ kernel/kernel: -lutil#		Link against our util library
 kernel/kernel: CPPFLAGS += -D OSLIBC_CORE_ONLY
 kernel/kernel: -lc_core#	Link against the core version of libc
 kernel/kernel: -lansi_term#	Link against ANSI terminal
+
+# List of processes
+PROCESSES += process/process1
+PROCESSES += process/process2
+
+$(PROCESSES): -lutil#		Link against our util library
+$(PROCESSES): -lansi_term#	Link against ANSI terminal
 
 # Export constants from C to assembly
 # ----------------------------------------------------------------------
@@ -253,7 +271,7 @@ clean:
 # which headers it actually includes:
 #
 #	target/kernel.o target/kernel.s: kernel.c \
-#	 addrs.h cpu_x86.h cpu.h dispatch.h fs.h block.h fstypes.h \
+#	 addrs.h cpu_x86.h cpu.h fs.h block.h fstypes.h \
 #	 interrupt.h kernel.h pcb.h keyboard.h mbox.h sync.h \
 #	 memory.h scheduler.h screen.h time.h usb/scsi.h usb/usb.h \
 

@@ -6,9 +6,12 @@
 
 #include <stdnoreturn.h>
 
+#include <syslib/compiler_compat.h>
+
 noreturn void abortk();
 
-__attribute__((format(printf, 3, 4))) noreturn extern void
+ATTR_PRINTFLIKE(3, 4)
+noreturn extern void
 _assertk_fail(const char *file, unsigned int line, const char *fmt, ...);
 
 #define assertf(assertion, fmt, ...) \

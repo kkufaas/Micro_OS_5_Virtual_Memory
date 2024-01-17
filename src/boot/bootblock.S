@@ -1,6 +1,6 @@
 /* === Options to switch code on and off === */
 
-	.equ	RELOCATE_SELF,		0
+	.equ	RELOCATE_SELF,		1
 	.equ	PASS_KERNEL_PARAMS,	0
 
 	.equ	DEBUG_GEOMETRY,		1

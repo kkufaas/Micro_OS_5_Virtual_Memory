@@ -46,10 +46,11 @@ CREATEIMAGE	= ./host/createimage
 BOOTBLOCK	= target/boot/bootblock
 KERNEL		= target/kernel/kernel
 
-CREATEIMAGE_FLAGS += --extended
+# List of processes
+PROCESSES += target/process/process1
+PROCESSES += target/process/process2
 
-host/createimage:
-	$(MAKE) -C host createimage
+CREATEIMAGE_FLAGS += --extended
 
 image: $(CREATEIMAGE) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)
 	$(CREATEIMAGE) $(CREATEIMAGE_FLAGS) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)

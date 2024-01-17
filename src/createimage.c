@@ -8,16 +8,20 @@
 
 #include <elf.h>
 #include <syslib/addrs.h>
+#include <syslib/compiler_compat.h>
 
 #define IMAGE_FILE "./image"
 static const char *usage_args[] = {
         "[--extended]",
         "<bootblock>",  "<kernel>",
+        "[process...]",
 };
 
 #define SECTOR_SIZE  512
 #define OS_SIZE_LOC  2
 #define BOOT_MEM_LOC 0x7c00
+
+#define UNUSED(var) ((void) var)
 
 /* structure to store command line options */
 static struct {
@@ -26,6 +30,8 @@ static struct {
     bool        extended;
     const char *bootblock;
     const char *kernel;
+    size_t       process_count;
+    const char **processes;
 } options;
 
 /* Image state */
@@ -40,13 +46,9 @@ static struct image_t {
 static void create_image();
 static void add_file(struct image_t *im, const char *filename);
 
-__attribute__((format(printf, 1, 2))) static void
-verbose_printf(const char *fmt, ...);
-
-__attribute__((format(printf, 1, 2))) static void error(const char *fmt, ...);
-
-__attribute__((format(printf, 1, 2))) static void
-usage_error(const char *fmt, ...);
+ATTR_PRINTFLIKE(1, 2) static void verbose_printf(const char *fmt, ...);
+ATTR_PRINTFLIKE(1, 2) static void error(const char *fmt, ...);
+ATTR_PRINTFLIKE(1, 2) static void usage_error(const char *fmt, ...);
 
 static void read_ehdr(Elf32_Ehdr *ehdr, FILE *fp);
 static void read_phdr(Elf32_Phdr *phdr, FILE *fp, int ph, Elf32_Ehdr ehdr);
@@ -85,7 +87,9 @@ int main(int argc, const char **argv)
     options.kernel = argv[i];
     i++;
 
-    if (i < argc) usage_error("unexpected inputs after kernel: %s\n", argv[i]);
+    /* remaining arguments are processes */
+    options.process_count = argc - i;
+    options.processes     = &argv[i];
 
     create_image();
     return 0;
@@ -99,6 +103,10 @@ static void create_image()
 
     add_file(&image, options.bootblock);
     add_file(&image, options.kernel);
+
+    for (size_t i = 0; i < options.process_count; i++) {
+        add_file(&image, options.processes[i]);
+    }
 
     write_os_size(&image);
 
@@ -160,6 +168,8 @@ static void read_phdr(Elf32_Phdr *phdr, FILE *fp, int ph, Elf32_Ehdr ehdr)
 
 static void write_segment(struct image_t *im, Elf32_Ehdr ehdr, Elf32_Phdr phdr)
 {
+    UNUSED(ehdr);
+
     size_t phyaddr;
 
     if (phdr.p_memsz == 0) return; /* nothing to write */
@@ -237,8 +247,8 @@ static void write_os_size(struct image_t *im)
     fseek(im->img, 0, SEEK_END);
 }
 
-__attribute__((format(printf, 1, 2))) static void
-verbose_printf(const char *fmt, ...)
+ATTR_UNUSED
+ATTR_PRINTFLIKE(1, 2) static void verbose_printf(const char *fmt, ...)
 {
     if (options.extended) {
         va_list args;
@@ -248,8 +258,7 @@ verbose_printf(const char *fmt, ...)
     }
 }
 
-__attribute__((format(printf, 1, 2))) static void
-usage_error(const char *fmt, ...)
+ATTR_PRINTFLIKE(1, 2) static void usage_error(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -268,7 +277,8 @@ usage_error(const char *fmt, ...)
 }
 
 /* print an error message and exit */
-__attribute__((format(printf, 1, 2))) static void error(const char *fmt, ...)
+ATTR_UNUSED
+ATTR_PRINTFLIKE(1, 2) static void error(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);

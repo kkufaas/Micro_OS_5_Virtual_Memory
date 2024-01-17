@@ -11,26 +11,31 @@
 
 #include <syslib/addrs.h>
 
-static short *screen = (short *) VGA_TEXT_PADDR;
-
 /* Simple delay loop to slow things down */
 void delay(uint32_t ticks)
 {
-    uint64_t wait_until = get_timer() + ticks;
+    uint64_t wait_until = read_cpu_ticks() + ticks;
 
-    while (get_timer() < wait_until)
+    while (read_cpu_ticks() < wait_until)
         ;
 }
 
-/* Read the pentium time stamp counter */
-uint64_t get_timer(void)
+/* Read the x86 time stamp counter */
+uint64_t read_cpu_ticks(void)
 {
-    uint64_t x = 0LL;
+    uint64_t tsc;
 
-    /* Load the time stamp counter into edx:eax (x) */
-    asm volatile("rdtsc" : "=A"(x));
+    /* RDTSC reads a 64-bit timestamp counter into EDX:EAX (high bits in EDX,
+     * low bits in EAX).
+     *
+     * The "A" operand constraint is specifically for this register
+     * configuration on x86-32.
+     *
+     * Note that if/when we move to x86-64, this will need to be changed.
+     * See <https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html> */
+    asm volatile("rdtsc" : "=A"(tsc));
 
-    return x;
+    return tsc;
 }
 
 /*

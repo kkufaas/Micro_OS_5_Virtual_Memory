@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include <ansi_term/termbuf.h>
+#include <syslib/compiler_compat.h>
 #include <syslib/screenpos.h>
 
 #include "../hardware/serial.h"
@@ -30,8 +31,7 @@ int vkprintf(enum log_level lvl, const char *fmt, va_list args)
     return ret;
 }
 
-__attribute__((format(printf, 2, 3))) int
-kprintf(enum log_level lvl, const char *fmt, ...)
+ATTR_PRINTFLIKE(2, 3) int kprintf(enum log_level lvl, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);

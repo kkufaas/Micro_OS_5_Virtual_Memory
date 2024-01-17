@@ -45,68 +45,12 @@ _start16:
 main16:
 	cli				# Disable interrupts for now.
 	print_str	$str_hello16	# Say hello.
-	call	test16			# Run a quick test.
 	call	a20_enable		# Enable A20 address line.
 	jmp	protected_mode_switch	# Enable Protected mode.
 
 	#.pushsection	.data
 str_hello16:	.asciz	"Kernel 16-bit startup\r\n"
 	#.popsection
-
-
-	/*
-	 * Run the trivial test and print results
-	 */
-test16:
-	.equ	TEST_REPS,	1000
-	print_str	$str_testing
-
-	pushw	$TEST_REPS
-	call	trivial_test	# trivial_test(1000)
-	addw	$2,	%sp
-	cmpw	$TEST_REPS,	%ax
-	jne	2f		# If (trivial_test(1000) != 1000) report failure
-1:	/* Test OK */
-	print_str	$str_test_ok
-	jmp	3f
-2:	/* Test failed */
-	pushw	$str_test_fail
-3:	/* End of test */
-	ret
-
-	#.pushsection	.data
-str_testing:	.asciz	"Running a trivial test... "
-str_test_ok:	.asciz	"Seems Ok. Now go get some sleep :)\r\n"
-str_test_fail:	.asciz	"*Failed*\r\n"
-	#.popsection
-
-	/*
-	 * int trivial_test(n)
-	 * {
-	 *     if (n > 0) {
-	 *         trivial_test(n-1);
-	 *     }
-	 *     return n;
-	 * }
-	 */
-trivial_test:
-	pushw	%bp		# Setup stack frame
-	movw	%sp,%bp
-	movw	4(%bp),%ax	# Move argument to ax
-	testw	%ax,%ax		# Logical compare (sets SF, ZF and PF)
-	jg	.L2		# if (argument > 0) goto L2
-	xorw	%ax,%ax		# else return 0
-	popw	%bp
-	retw
-.L2:
-	decw	%ax
-	pushw	%ax
-	call	trivial_test	# trivial_test(argument - 1)
-				# (Recursive calls until argument == 0)
-	addw	$2,%sp		# Pop argument
-	incw	%ax
-	popw	%bp
-	retw			# Return (argument in ax)
 
 
 /* === Switching to Protected Mode === */

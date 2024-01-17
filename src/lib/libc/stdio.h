@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include <syslib/compiler_compat.h>
+
 /* === Core: no syscalls required === */
 
 #define EOF (-1)
@@ -48,16 +50,14 @@ int ferror(FILE *stream);
 int fputc(int ch, FILE *file);
 int fputs(const char *str, FILE *file);
 
-__attribute__((format(printf, 2, 3))) int
-    fprintf(FILE *file, const char *format, ...);
+ATTR_PRINTFLIKE(2, 3) int fprintf(FILE *file, const char *format, ...);
 int vfprintf(FILE *file, const char *format, va_list args);
 
-__attribute__((format(printf, 3, 4))) int
-    snprintf(char *buffer, size_t bufsz, const char *format, ...);
+ATTR_PRINTFLIKE(3, 4)
+int snprintf(char *buffer, size_t bufsz, const char *format, ...);
 int vsnprintf(char *buffer, size_t bufsz, const char *format, va_list args);
 
-__attribute__((format(printf, 2, 3))) int
-    sprintf(char *buffer, const char *format, ...);
+ATTR_PRINTFLIKE(2, 3) int sprintf(char *buffer, const char *format, ...);
 int vsprintf(char *buffer, const char *format, va_list args);
 
 /* === Non-core: syscalls required === */

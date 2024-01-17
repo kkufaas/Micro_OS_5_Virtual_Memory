@@ -6,6 +6,8 @@
 #include "errno.h"
 #include "string.h"
 
+#include <syslib/compiler_compat.h>
+
 #include "math.h"
 
 #define UNUSED(var) ((void) var)
@@ -332,8 +334,7 @@ static const char *signstr(bool isneg, struct fmtspec *spec)
 
 static void fmt_signed(FILE *file, struct fmtspec *spec, intmax_t val)
 {
-    bool      isneg = val < 0;
-    uintmax_t uval  = val < 0 ? -val : val;
+    uintmax_t uval = val < 0 ? -val : val;
 
     char  digitbuf[DIGITBUFSZ];
     char *digits = digitbuf + DIGITBUFSZ; // We'll work from right to left.
@@ -472,7 +473,7 @@ static void fmt_float(FILE *file, struct fmtspec *spec, long double dval)
 
         /* Write exponent to buffer. */
         char *exp_end = str;
-        str           = inttodigits(str, labs(exp), base, lowerhex);
+        str           = inttodigits(str, labs(exp), base, digitset);
         /* The spec says that exponent part should show at least two digits. */
         while (exp_end - str < 2) *--str = '0';
 
@@ -723,8 +724,7 @@ int vfprintf(FILE *file, const char *format, va_list args)
     return written_ct(file) - start_ct;
 }
 
-__attribute__((format(printf, 2, 3))) int
-fprintf(FILE *file, const char *format, ...)
+ATTR_PRINTFLIKE(2, 3) int fprintf(FILE *file, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -750,6 +750,7 @@ int vsnprintf(char *buf, size_t bufsz, const char *format, va_list args)
     return count;
 }
 
+ATTR_PRINTFLIKE(3, 4)
 int snprintf(char *buffer, size_t bufsz, const char *format, ...)
 {
     va_list args;
@@ -764,6 +765,7 @@ int vsprintf(char *buffer, const char *format, va_list args)
     return vsnprintf(buffer, INT_MAX, format, args);
 }
 
+ATTR_PRINTFLIKE(2, 3)
 int sprintf(char *buffer, const char *format, ...)
 {
     va_list args;

@@ -3,7 +3,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-__attribute__((weak)) int tprintf(const char *fmt, ...)
+#include <syslib/compiler_compat.h>
+
+ATTR_WEAK int tprintf(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -17,8 +19,10 @@ int tprintloc_(const char *file, int line, const char *func)
     return tprintf("%s:%d: %s: ", file, line, func);
 }
 
-__attribute__((format(printf, 4, 5))) int
-treportf(const char *file, int line, const char *func, const char *fmt, ...)
+ATTR_PRINTFLIKE(4, 5)
+int treportf(
+        const char *file, int line, const char *func, const char *fmt, ...
+)
 {
     tprintloc_(file, line, func);
     va_list args;

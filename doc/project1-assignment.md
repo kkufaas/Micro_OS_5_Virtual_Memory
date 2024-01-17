@@ -101,7 +101,7 @@ Useful information and documentation:
     Manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
     The reference for all things x86 assembler. Get all the software
     developers manuals (Volume 1-3). Note that Intel documents use the
-    intel assembler syntax, whereas you use the AT\&T assembler syntax.
+    Intel assembler syntax, whereas you use the AT\&T assembler syntax.
 
   - [A Guide to Programming Pentium/Pentium Pro
     Processors](doc/x86/pentium-programming-kai-lee.pdf). A good

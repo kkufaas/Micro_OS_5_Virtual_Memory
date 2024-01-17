@@ -215,7 +215,6 @@ int test_termbuf_ansi_erase_line()
 int test_termbuf_ansi_erase_display()
 {
     bufarray buf;
-    linebuf  line;
     fillbuf(buf, 0);
 
     struct term term = TERM_INIT(buf, 25, 80, 1, 23, 1, 78);
@@ -324,7 +323,6 @@ int test_termbuf_backspace()
 int test_termbuf_cursor()
 {
     bufarray buf;
-    linebuf  line;
     fillbuf(buf, 0);
 
     struct term term = TERM_INIT(buf, 25, 80, 0, 25, 0, 80);

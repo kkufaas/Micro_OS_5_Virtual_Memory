@@ -8,5 +8,6 @@
 
 #include "cpu.h"
 #include "hardware/cpu_x86.h"
+#include "pcb.h"
 
 #endif /* !KERNEL_H */

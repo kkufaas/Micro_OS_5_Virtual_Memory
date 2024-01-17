@@ -11,7 +11,7 @@
 #include <syslib/common.h>
 
 void delay(uint32_t val);
-uint64_t get_timer(void);
+uint64_t read_cpu_ticks(void);
 
 int same_string(char *s1, char *s2);
 

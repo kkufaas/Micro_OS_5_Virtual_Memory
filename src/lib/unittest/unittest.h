@@ -3,8 +3,10 @@
 
 #include <stdarg.h>
 
+#include <syslib/compiler_compat.h>
+
+ATTR_PRINTFLIKE(1, 2) int tprintf(const char *fmt, ...);
 int tvprintf(const char *fmt, va_list args);
-__attribute__((format(printf, 1, 2))) int tprintf(const char *fmt, ...);
 
 typedef int testfn();
 
@@ -23,8 +25,10 @@ struct testresults {
 
 int runtests(testfn **fns, struct testresults *results);
 
-__attribute__((format(printf, 4, 5))) int
-treportf(const char *file, int line, const char *func, const char *fmt, ...);
+ATTR_PRINTFLIKE(4, 5)
+int treportf(
+        const char *file, int line, const char *func, const char *fmt, ...
+);
 int treportassert(
         const char *file, int line, const char *func, const char *assertion
 );

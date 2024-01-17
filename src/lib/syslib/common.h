@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <syslib/compiler_compat.h>
+
 /*
  * === Definitions that match POSIX sys/types.h ===
  *
@@ -22,5 +24,14 @@ typedef long int off_t; // Used for file sizes.
 #endif
 
 /* === Other definitions === */
+
+/* === System call numbers === */
+
+/* Unique integers for each system call */
+enum {
+    SYSCALL_YIELD,
+    SYSCALL_EXIT,
+    SYSCALL_COUNT
+};
 
 #endif /* !COMMON_H */
