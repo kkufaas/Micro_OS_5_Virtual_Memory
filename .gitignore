@@ -44,3 +44,10 @@ compile_commands.json
 
 # GDB init
 .gdbinit
+
+# HTML previews of Markdown documents
+*.md.html
+
+# Documentation artifacts that are not supposed to appear in precode
+*.pptx
+src_only/
