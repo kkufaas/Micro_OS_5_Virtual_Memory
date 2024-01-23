@@ -48,7 +48,7 @@ DESCRIPTION:
 EXAMPLE:
 
     # Build the OS image
-    $SCRIPTNAME make
+    $SCRIPT_NAME make
 
 END_USAGE
     exit 1
