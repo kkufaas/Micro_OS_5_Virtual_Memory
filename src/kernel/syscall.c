@@ -13,21 +13,40 @@
 
 /* === Syscall Entry === */
 
-void syscall_entry(int fn); // Defined in assembly in entry.S
+void syscall_entry(int fn); // Defined in assembly
+
+#define stringify(x) #x
 
 static void init_syscall_entry_fixedpoint(void)
 {
-    /* Declare the entry function type. */
-    typedef typeof(syscall_entry) entry_fn_t;
+    /* Load the address of the entry function into the fixed address
+     *
+     * In assembly this boils down to one instruction:
+     *
+     *      00001a86 <init_syscall_entry_fixedpoint>:
+     *          1a86:       c7 05 00 0f 00 00 41    movl   $0x1a41,0xf00
+     *          1a8d:       1a 00 00
+     *
+     *  "load the address of the entry function into memory location 0xf00."
+     *
+     * But to get there in C we have to do some type trickery:
+     *
+     * 1. Cast the address constant to a double pointer:
+     *  "the constant 0xf00 is a pointer to address 0xf00 which will be
+     *   a pointer to an entry function."
+     *
+     * 2. Dereference once to get an assignable function pointer:
+     *  "address 0xf00 is a pointer to an entry function"
+     *
+     * 3. Finally assign the function pointer:
+     *  "load the address of the entry function into memory location 0xf00."
+     */
+    *(typeof(syscall_entry) **) SYSCALL_ENTRY_FN_PTR_PADDR =
+            syscall_entry;
 
-    /* The fixed address is a pointer to the entry function. */
-    /* entry_point is a pointer to the fixed address. */
-    entry_fn_t **entry_point = (entry_fn_t **) SYSCALL_ENTRY_FN_PTR_PADDR;
-
-    /* Load the address of syscall_entry into the fixed address. */
-    *entry_point = syscall_entry;
-
-    pr_info("Inititialized syscall entry fixed point.\n");
+    pr_info("Set syscall fixed point %#x -> %p -> %s\n",
+            SYSCALL_ENTRY_FN_PTR_PADDR, syscall_entry,
+            stringify(syscall_entry));
 }
 
 /* === Syscall Dispatch === */

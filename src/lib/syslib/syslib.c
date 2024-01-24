@@ -23,12 +23,35 @@ invoke_syscall_fixedpoint(int syscall_id, int arg1, int arg2, int arg3)
     /* Declare the entry function type. */
     typedef int entry_fn_t(int syscall_id, int arg1, int arg2, int arg3);
 
-    /* The fixed address is a pointer to the entry function. */
-    /* entry_point is a pointer to the fixed address. */
-    entry_fn_t **entry_point = (entry_fn_t **) SYSCALL_ENTRY_FN_PTR_PADDR;
-
-    /* Call the function via the pointer-to-pointer. */
-    return (*entry_point)(syscall_id, arg1, arg2, arg3);
+    /* Call the entry function via fixed address
+     *
+     * In assembly this is very simple. Take the yield function:
+     *
+     *      00007bc2 <yield>:
+     *          7bc2:       6a 00                   push   $0x0
+     *          7bc4:       6a 00                   push   $0x0
+     *          7bc6:       6a 00                   push   $0x0
+     *          7bc8:       6a 00                   push   $0x0
+     *          7bca:       ff 15 00 0f 00 00       call   *0xf00
+     *          7bd0:       83 c4 10                add    $0x10,%esp
+     *          7bd3:       c3                      ret
+     *
+     *  "dereference 0xf00 to get a function address and call it."
+     *
+     * But to get there in C we have to do some type trickery:
+     *
+     * 1. Cast the address constant to a double pointer:
+     *  "the constant 0xf00 is a pointer to address 0xf00 which is
+     *   a pointer to the entry function."
+     *
+     * 2. Dereference once to get a callable function pointer:
+     *  "address 0xf00 is a pointer to the entry function"
+     *
+     * 3. Finally call via the function pointer:
+     *  "dereference 0xf00 to get a function address and call it."
+     */
+    return (*(entry_fn_t **) SYSCALL_ENTRY_FN_PTR_PADDR
+    )(syscall_id, arg1, arg2, arg3);
 }
 
 /*
