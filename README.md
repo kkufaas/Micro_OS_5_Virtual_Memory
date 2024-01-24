@@ -50,21 +50,24 @@ Quick summary:
     but they are not officially supported.
 - There is also a Dockerfile to set up a container for building the OS.
 
-### Ubuntu
+### Required Packages
 
-Required packages:
+To build and run the OS, you need the GCC compiler toolchain, GCC 32-bit x86
+libraries, and the Bochs x86 emulator.
 
-| Package           | Purpose                             |
-|-------------------|-------------------------------------|
-| `build-essential` | required compilers and utilities    |
-| `gcc-multilib`    | GCC 32-bit support                  |
-| `bochs`           | x86 PC emulator that can run the OS |
+On Ubuntu (or other `apt`-based distros), these are in the following packages:
+
+| Purpose                             | Ubuntu package    |
+|-------------------------------------|-------------------|
+| required compilers and utilities    | `build-essential` |
+| GCC 32-bit support                  | `gcc-multilib`    |
+| x86 PC emulator that can run the OS | `bochs`           |
 
 To install these packages on Ubuntu, run
 
     sudo apt install build-essential gcc-multilib bochs
 
-Building and Running the OS
+Building the OS
 --------------------------------------------------
 
 The build is controlled by Make.
@@ -74,12 +77,15 @@ To build the OS, simply run Make with no arguments:
 
 Or, to run make in a Docker container, use the `docker-run` script:
 
-    docker-run make
+    ./docker-run make
 
 This produces a disk image (filename `image`) that can be booted in an emulator
 or on some old PCs.
 
-## Running in the Bochs Emulator
+If you run into trouble, check the [build FAQ](doc/build/build-faq.md).
+
+Running in the Bochs Emulator
+--------------------------------------------------
 
 The supported emulator is Bochs.
 
