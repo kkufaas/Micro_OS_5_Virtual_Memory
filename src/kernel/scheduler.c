@@ -26,13 +26,18 @@ void scheduler(void)
 }
 
 /*
- * Save context and enter the scheduler to switch tasks
+ * Save task state and enter the scheduler (defined in assembly)
+ *
+ * This low-level function saves the context of the 'current_running' task
+ * and then calls 'scheduler()' to pick the next task. On the return path,
+ * it restores the state of the new 'current_running' and returns to where
+ * it left off.
  *
  * Because this function has to do low-level manipulation of stack and
- * registers, it must be written in assembly. It will save the task context
- * and then come back to C by calling the scheduler function.
+ * registers, it must be written in assembly. The implementation is in
+ * scheduler_asm.S
  */
-void scheduler_entry(void);
+extern void scheduler_entry(void);
 
 /* Call scheduler to run the 'next' process */
 void yield(void)

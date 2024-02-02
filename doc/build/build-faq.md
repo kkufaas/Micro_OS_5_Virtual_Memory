@@ -3,6 +3,8 @@
         -lgcc`](#linker-error-searching-for--lgcc)
       - [Makefile error: `unterminated call to function
         'shell'`](#makefile-error-unterminated-call-to-function-shell)
+      - [Bochs error: `No bootable device` after
+        force-quit](#bochs-error-no-bootable-device-after-force-quit)
 
 ## Common Errors
 
@@ -154,3 +156,24 @@ Notes](https://lists.gnu.org/archive/html/info-gnu/2020-01/msg00004.html):
 >     This was claimed to be fixed in 3.81, but wasn’t, for some reason.
 >     To detect this change search for ‘nocomment’ in the .FEATURES
 >     variable.
+
+### Bochs error: `No bootable device` after force-quit
+
+1.  Bochs was running the image, but responding to input and you had to
+    force quit / kill it
+2.  When you started Bochs again, the BIOS boot failed with `No bootable
+    device`
+
+#### Problem
+
+The image was locked by the previous Bochs instance. The new Bochs
+instance is quietly skipping the locked image file and then loudly
+complaining that there is no other bootable image.
+
+#### Solution
+
+Delete the `image.lock` file in your project directory.
+
+    $ ls image*
+    image
+    image.lock      # <-- delete this one

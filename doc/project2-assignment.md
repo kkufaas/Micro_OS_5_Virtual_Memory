@@ -58,14 +58,14 @@ You are required to do the following:
     framework should be in place. You are required to implement two
     system calls: yield and exit.
 
-4.  Implement two synchronization primitives for mutual exclusion:
-    lock acquire and lock release. Their semantics should be identical
-    to that described in [Birrell’s
-    paper](concurrency/programming-with-threads-andrew-birrell.pdf). To
-    implement mutual exclusion, the scheduler needs to support blocking
-    and unblocking of threads. This should be implemented as the two
-    functions block and unblock , but they are not system calls and
-    should only be called from within the Kernel.
+4.  Realize one synchronization primitives for mutual exclusion by
+    implementing: lock\_acquire and lock\_release. Their semantics
+    should be identical to that described in [Birrell’s
+    paper](concurrency/programming-with-threads-andrew-birrell.pdf). For
+    this the scheduler needs to support blocking and unblocking of
+    threads. This should be implemented as the two functions block and
+    unblock, but they are not system calls and should only be called
+    from within the Kernel.
 
 5.  Measure the overhead of context switches.
 
@@ -154,9 +154,9 @@ understand the stack frame and the calling convention.
 The synchronization primitives are meant for in-kernel threads only and
 need not be implemented as system calls. They need to deal with the PCB
 data structures to block and unblock threads. An important step is to
-figure out how to queue blocked threads. Although it is easy to
-implement the synchronization primitives in the way that would works
-with a preemptive scheduler, it is not required in this project.
+figure out how to queue blocked threads. Although it is feasible to
+implement the synchronization primitive in a way that would works with a
+preemptive scheduler, it is not required in this project.
 
 Finally, once all this is up and running you should measure the overhead
 (time used) of context switches in your system. To do this you can use

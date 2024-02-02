@@ -22,8 +22,7 @@
 	.text
 
 	/*
-	 * This function gets called to enter the scheduler, saving registers
-	 * before doing so.
+	 * Save task state and enter the scheduler
 	 */
 	.globl  scheduler_entry
 scheduler_entry:
