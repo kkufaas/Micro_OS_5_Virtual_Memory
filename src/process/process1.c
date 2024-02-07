@@ -26,7 +26,11 @@ static const char plane_art[PLANE_ROWS][PLANE_COLUMNS + 1] =
 
 #define PLANE_LOC_X_MAX (PLANE_COL_MAX)
 
-#define DELAY_TICKS 10000000
+#define DELAY_MS 250
+
+#define PRIORITY_FRAME_COUNT 100
+#define PRIORITY_MIN         10
+#define PRIORITY_MAX         64
 
 static struct term term = PLANE_TERM_INIT;
 
@@ -48,6 +52,9 @@ static void draw_plane(int x, int y)
 
 int main(void)
 {
+    /* priority state */
+    int          frame_count = 0;
+    unsigned int priority    = getpriority();
 
     struct termwin win = term_getwin(&term);
 
@@ -62,8 +69,18 @@ int main(void)
         /* draw */
         draw_plane(plane_x, plane_y);
 
-        delay(DELAY_TICKS);
-        yield();
+        /* Adjust priority */
+        frame_count++;
+        if (frame_count % PRIORITY_FRAME_COUNT == 0) {
+
+            priority++;
+            if (priority > PRIORITY_MAX) {
+                priority = PRIORITY_MIN;
+            }
+            setpriority(priority);
+        }
+
+        ms_delay(DELAY_MS);
     }
 
     return 0;

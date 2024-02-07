@@ -131,6 +131,7 @@ static void overflow(struct term *t)
     if (row_ct <= 0) return;
 
     switch (t->overflow) {
+    case TERM_OF_CLIP: break;
     case TERM_OF_SCROLL: scroll(t, row_ct); break;
     case TERM_OF_GROW:
         while (row_ct && t->win.start_row) {
@@ -151,6 +152,8 @@ static void overflow(struct term *t)
 
 static void move_cursor_into_bounds(struct term *t)
 {
+    if (t->overflow == TERM_OF_CLIP) return;
+
     /* Wrap at end of line. */
     if (t->col >= t->win.width) term_setpos(t, t->row + 1, 0);
 

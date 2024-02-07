@@ -19,4 +19,60 @@
 #ifndef ASM_COMMON_H_S
 #define ASM_COMMON_H_S
 
+	/* Save all registers, except eflags */
+.macro SAVE_GEN_REGS
+	pushl	%eax
+	pushl	%ebx
+	pushl	%ecx
+	pushl	%edx
+	pushl	%edi
+	pushl	%esi
+	pushl	%ebp
+.endm
+
+	/* Restore all registers, except eflags */
+.macro RESTORE_GEN_REGS
+	popl	%ebp
+	popl	%esi
+	popl	%edi
+	popl	%edx
+	popl	%ecx
+	popl	%ebx
+	popl	%eax
+.endm
+
+.macro SAVE_EFLAGS
+	pushfl
+.endm
+
+.macro RESTORE_EFLAGS
+	popfl
+.endm
+
+	/*
+	 * Save all floating point registers on the stack
+	 *
+	 * There are three options for saving floating point state:
+	 *
+	 * - FSAVE: Saves x87 FPU state, with FP exception checking
+	 * - FNSAVE: Saves x87 FPU state, without FP exception checking
+	 * - FXSAVE: Saves x87 FPU and MMX state.
+	 *	The FXSAVE memory area must be aligned to a 16-byte boundary.
+	 *
+	 * We use FNSAVE here because we do not need FSAVE's exception checking
+	 * or FXSAVE's MMX storage (we are not using MMX).
+	 */
+	.equ	FP_STATE_SIZE,	108
+.macro SAVE_FP_REGS
+	subl	$FP_STATE_SIZE,	%esp
+	fnsave	0(%esp)
+	fwait
+.endm
+
+	/* Restore floating point registers */
+.macro RESTORE_FP_REGS
+	frstor	0(%esp)
+	addl	$FP_STATE_SIZE,	%esp
+.endm
+
 #endif /* ASM_COMMON_H_S */

@@ -130,6 +130,40 @@ int test_termbuf_window()
     return TEST_PASS;
 }
 
+int test_termbuf_window_ignore_overflow()
+{
+    bufarray buf;
+    linebuf  line;
+    fillbuf(buf, 0);
+
+    /* Tiny window */
+    struct term term = TERM_INIT(buf, 25, 80, 2, 3, 10, 5);
+    term.overflow    = TERM_OF_CLIP;
+
+    /* Text should NOT wrap */
+    {
+        term_puts(&term, "abcdefghijkl");
+        bufstr(buf, 1, 10, line);
+        tassert_streq("", line);
+
+        bufstr(buf, 2, 10, line);
+        tassert_streq("abcde", line);
+
+        bufstr(buf, 3, 10, line);
+        tassert_streq("", line);
+    }
+
+    /* Should be no writing outside of window */
+    {
+        tassert_eq(0, buf[1][10][0]);
+        tassert_eq(0, buf[1][14][0]);
+        tassert_eq(0, buf[2][9][0]);
+        tassert_eq(0, buf[2][15][0]);
+    }
+
+    return TEST_PASS;
+}
+
 int test_termbuf_ansi_cursor_pos()
 {
     bufarray buf;

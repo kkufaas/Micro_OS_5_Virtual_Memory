@@ -28,7 +28,7 @@
 #include "sync.h"
 
 static const int WORKERS = 4;
-static const int DARTS = 1000;
+static const int DARTS = 40000;
 
 /* Global stats */
 static volatile int gdarts;
@@ -68,6 +68,7 @@ void print_mcpi_status(int line, char label, int hits, int darts)
     double estpi = 4.0 * hits / darts;
     lock_acquire(&termlock);
     tprintf(&term, ANSIF_CUP, line + 1, 0);
+    tprintf(&term, "%2d ", current_running->pid);
     tprintf(&term, "Pi %c: %5d/%5d->%f", label, hits, darts, estpi);
     lock_release(&termlock);
 }

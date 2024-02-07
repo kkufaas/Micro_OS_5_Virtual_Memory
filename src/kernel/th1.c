@@ -7,6 +7,7 @@
 #include "pcb.h"
 #include "scheduler.h"
 #include "th1.h"
+#include "time.h"
 
 static struct term clockterm = CLOCK_TERM_INIT;
 
@@ -27,9 +28,10 @@ void clock_thread(void)
         uint64_t     ticks_now     = read_cpu_ticks();
         uint64_t     elapsed       = ticks_now - start_ticks;
         unsigned int elapsed_shift = (int) (elapsed >> tick_shift);
-        unsigned int mhz = 500;
+        unsigned int mhz = cpuspeed();
         unsigned int time = elapsed_shift / mhz;
 
+        tprintf(&clockterm, "%2d ", current_running->pid);
         tprintf(&clockterm, "Clock: %d seconds", time);
         tprintf(&clockterm, ANSIF_EL "\r",
                 ANSI_EFWD); // Clear right, then return

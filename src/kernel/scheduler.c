@@ -5,10 +5,12 @@
 
 #include "hardware/cpu_x86.h"
 #include "cpu.h"
-#include "kernel.h"
 #include "lib/assertk.h"
+#include "lib/printk.h"
 #include "lib/todo.h"
 #include "scheduler.h"
+#include "sync.h"
+#include "time.h"
 
 /* Ready queue and pointer to currently running process */
 pcb_t *current_running;
@@ -22,7 +24,31 @@ pcb_t *current_running;
  */
 void scheduler(void)
 {
-    todo_abort();
+    nointerrupt_enter();
+
+    do {
+        switch (current_running->status) {
+
+        case STATUS_FIRST_TIME:
+        case STATUS_READY:
+            /* pick the next job to run */
+            current_running = current_running->next;
+            break;
+
+        case STATUS_BLOCKED:
+        case STATUS_EXITED:
+            queue_shift(&current_running);
+            assertf(current_running != NULL, "no more jobs");
+            break;
+
+        default: assertf(0, "Invalid job status."); break;
+        }
+    } while (current_running->status != STATUS_READY
+             && current_running->status != STATUS_FIRST_TIME);
+
+    /* .. and run it */
+    dispatch();
+    nointerrupt_leave();
 }
 
 /*
@@ -39,22 +65,62 @@ void scheduler(void)
  */
 extern void scheduler_entry(void);
 
+int preempt_count = 0;
+int yield_count   = 0;
+
 /* Call scheduler to run the 'next' process */
 void yield(void)
+{
+    nointerrupt_enter();
+    yield_count++;
+    scheduler_entry();
+    nointerrupt_leave();
+}
+
+void preempt(void)
 {
     todo_noop();
 }
 
 void block(pcb_t **q)
 {
-    todo_use(q);
-    todo_noop();
+    nointerrupt_enter();
+    assertk(q != NULL);
+
+    current_running->status = STATUS_BLOCKED;
+
+    /* Put current task into give blocked queue */
+    if (*q == NULL) {
+        *q = current_running;
+    } else {
+        pcb_t *p = *q;
+        while (p->next != NULL) { // Navigate to end of queue
+            p = p->next;
+        }
+        p->next = current_running; // Put current task at the end
+    }
+
+    /* remove job from ready queue, pick next job to run and dispatch it */
+    scheduler_entry();
+
+    nointerrupt_leave();
 }
 
 void unblock(pcb_t **q)
 {
-    todo_use(q);
-    todo_noop();
+    nointerrupt_enter();
+    assertk(q != NULL);
+    assertk(*q != NULL);
+
+    /* Pull a task from the blocked queue */
+    pcb_t *job;
+    job = queue_shift(q);
+
+    /* Put it back into the ready queue */
+    job->status = STATUS_READY;
+    queue_insert(&current_running, job);
+
+    nointerrupt_leave();
 }
 
 /*
@@ -63,7 +129,19 @@ void unblock(pcb_t **q)
  */
 noreturn void exit(void)
 {
-    todo_noop();
+    nointerrupt_enter();
+    current_running->status = STATUS_EXITED;
+    /* Removes job from ready queue, and dispatches next job to run */
+    scheduler_entry();
+    /* No need to leave the critical section. This code is unreachable. */
     assertf(0, "control returned to exited thread");
 }
+
+/* === Get and set process priority === */
+
+/* Get task priority (exported as syscall) */
+int getpriority(void) { return current_running->priority; }
+
+/* Set task priority (exported as syscall) */
+void setpriority(int p) { current_running->priority = p; }
 

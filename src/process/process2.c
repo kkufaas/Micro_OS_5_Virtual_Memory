@@ -10,7 +10,7 @@
 #include <syslib/syslib.h>
 #include <util/util.h>
 
-#define DELAY_TICKS 10000000
+#define DELAY_MS 700
 
 /* calculate 1 + ... + n */
 static int rec(int n)
@@ -35,10 +35,11 @@ int main(void)
     for (i = 0; i <= 100; i++) {
         res = rec(i);
 
+        tprintf(&term, "%2d ", getpid());
         tprintf(&term, "Did you know: 1 + ... + %d = %d ", i, res);
         tprintf(&term, ANSIF_EL "\r", ANSI_EFWD); // Clear right, then return
 
-        delay(DELAY_TICKS);
+        ms_delay(DELAY_MS);
         yield();
     }
 

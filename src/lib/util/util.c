@@ -11,13 +11,38 @@
 
 #include <syslib/addrs.h>
 
-/* Simple delay loop to slow things down */
-void delay(uint32_t ticks)
-{
-    uint64_t wait_until = read_cpu_ticks() + ticks;
+/*
+ * define a local prototype to int cpuspeed(), so we don't get any
+ * compiler warnings
+ */
+int cpuspeed(void);
 
-    while (read_cpu_ticks() < wait_until)
-        ;
+static uint64_t ms_to_cycles(uint32_t msecs)
+{
+    static uint32_t cpu_spd = 0;
+    uint64_t        result;
+
+    if (!cpu_spd) cpu_spd = cpuspeed();
+
+    /* cycles pr ms : (MHz * 10 ^ 6) * 10 ^ -3 = MHz * 10^3 */
+    result = cpu_spd * 1000;
+    result *= msecs;
+    return result;
+}
+
+/*
+ * Wait for atleast <msecs> number of milliseconds. Does not handle
+ * the counter overflowing.
+ */
+void ms_delay(uint32_t msecs)
+{
+    uint64_t cur_time, end_time;
+
+    cur_time = read_cpu_ticks();
+    end_time = cur_time + ms_to_cycles(msecs);
+    while (cur_time < end_time) {
+        cur_time = read_cpu_ticks();
+    }
 }
 
 /* Read the x86 time stamp counter */

@@ -18,6 +18,9 @@
 
 #define PLANE_TERM_INIT TERM_INIT_VGA_WIN(7, 4, 40, 40) // Plane
 
+#define PHL_TERM_INIT TERM_INIT_VGA_WIN(16, 3, 40, 40) // Philosophers
+#define BAR_TERM_INIT TERM_INIT_VGA_WIN(19, 3, 40, 40) // Barrier test
+
 /* === Footer: printk log === */
 
 #define PRINTK_TERM_INIT TERM_INIT_VGA_WIN(22, 3, 0, 80)

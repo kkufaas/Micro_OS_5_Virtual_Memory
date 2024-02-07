@@ -10,9 +10,15 @@
 #include "lib/printk.h"
 #include "lib/todo.h"
 
+#include "interrupt.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "sync.h"
+
+/* === Get PCB info === */
+
+/* Get process PID (exported as syscall) */
+int getpid(void) { return current_running->pid; }
 
 /* === Threads as a doubly-linked ring queue === */
 
@@ -21,6 +27,7 @@
  */
 void queue_insert(struct pcb **q, struct pcb *p)
 {
+    nointerrupt_enter();
     assertf(q, "pointer to queue must be non-null");
     assertf(p->next == NULL, "thread is already in another queue");
 
@@ -37,6 +44,7 @@ void queue_insert(struct pcb **q, struct pcb *p)
         p->previous->next = p;
         p->next->previous = p;
     }
+    nointerrupt_leave();
 }
 
 /*
@@ -47,6 +55,7 @@ void queue_insert(struct pcb **q, struct pcb *p)
  */
 struct pcb *queue_shift(struct pcb **q)
 {
+    nointerrupt_enter();
     struct pcb *p;
     assertf(q, "pointer to queue must be non-null");
     if (!*q) {
@@ -65,6 +74,7 @@ struct pcb *queue_shift(struct pcb **q)
         p->previous = NULL;
         p->next     = NULL;
     }
+    nointerrupt_leave();
     return p;
 }
 
@@ -77,6 +87,7 @@ static int queue_pos(struct pcb **q, struct pcb *p)
 {
     static const int LIMIT = PCB_TABLE_SIZE;
 
+    nointerrupt_enter();
     assertf(q, "pointer to queue must be non-null");
 
     int pos;
@@ -111,6 +122,7 @@ static int queue_pos(struct pcb **q, struct pcb *p)
     }
 
 end:
+    nointerrupt_leave();
     return pos;
 }
 
@@ -119,6 +131,7 @@ end:
  */
 void queue_remove(struct pcb **q, struct pcb *p)
 {
+    nointerrupt_enter();
     assertf(q, "pointer to queue must be non-null");
     assertf(queue_pos(q, p) >= 0, "thread must be in queue to remove");
 
@@ -137,6 +150,7 @@ void queue_remove(struct pcb **q, struct pcb *p)
     p->next     = NULL;
     p->previous = NULL;
 
+    nointerrupt_leave();
 }
 
 /* === PCB Allocation === */
@@ -144,12 +158,97 @@ void queue_remove(struct pcb **q, struct pcb *p)
 /* Statically allocate some storage for the pcb's */
 pcb_t pcb[PCB_TABLE_SIZE];
 
+/* Used for allocation of pids, kernel stack, and pcbs */
+static pcb_t    *freelist   = NULL;
+static int       next_pid   = 0;
+static uintptr_t next_stack = T_KSTACK_AREA_MIN_PADDR;
+
 /* Initialize pcb table before allocating pcbs */
 void init_pcb_table(void)
 {
-    /* Here you can initialize the empty PCB array to get it ready to
-     * allocate PCBs. */
-    todo_noop();
+    /* Put entire PCB table into the freelist. */
+    freelist = NULL;
+    for (struct pcb *p = pcb; p < pcb + PCB_TABLE_SIZE; p++) {
+        *p = (struct pcb){
+                .next     = NULL,
+                .previous = NULL,
+        };
+        queue_insert(&freelist, p);
+    }
+
+    /* current_running also serves as the ready queue pointer */
+    current_running             = NULL;
+}
+
+/* Get a free pcb */
+static pcb_t *alloc_pcb()
+{
+    pcb_t *p;
+    assertf(freelist, "no free pcb structs");
+    p = queue_shift(&freelist);
+    return p;
+}
+
+static void create_pcb_common(struct pcb *p)
+{
+    p->pid = next_pid++;
+
+    /* allocate kernel stack */
+    assertf(next_stack < T_KSTACK_AREA_MAX_PADDR, "Out of stack space");
+    p->kernel_stack = next_stack + T_KSTACK_START_OFFSET;
+    next_stack += T_KSTACK_SIZE_EACH;
+
+    p->priority = 10;
+    p->status = STATUS_FIRST_TIME;
+
+}
+
+/*
+ * Allocate and set up the pcb for a new thread, allocate resources
+ * for it and insert it into the ready queue.
+ */
+int create_thread(uintptr_t start_addr)
+{
+
+    pcb_t *p = alloc_pcb();
+    create_pcb_common(p);
+
+    p->is_thread = true;
+
+    p->nested_count = 1;
+
+    p->user_stack = 0; /* threads don't have a user stack */
+
+    p->start_pc = start_addr;
+
+    queue_insert(&current_running, p);
+    return 0;
+}
+
+/*
+ * Allocate and set up the pcb for a new process, allocate resources
+ * for it and insert it into the ready queue.
+ */
+int create_process(uintptr_t start_addr)
+{
+
+    pcb_t *p = alloc_pcb();
+    create_pcb_common(p);
+
+    p->is_thread = false;
+
+    p->nested_count = 0;
+
+    /* setup user stack */
+    assertk(next_stack < T_KSTACK_AREA_MAX_PADDR);
+    p->user_stack = next_stack + T_KSTACK_START_OFFSET;
+    next_stack += T_KSTACK_SIZE_EACH;
+
+    p->start_pc = start_addr;
+
+    queue_insert(&current_running, p);
+
+    return 0;
 }
 
 /* === Print Process Status Table === */
@@ -162,23 +261,57 @@ static struct term procterm = PROCTAB_TERM_INIT;
  */
 void print_pcb_table(void)
 {
+    procterm.overflow = TERM_OF_CLIP;
+
     /* Reset to top of window and print header. */
     tprintf(&procterm, ANSIF_CUP, 1, 1);
+
+    tprintf(&procterm, "preempt:%5d, yield:%5d", preempt_count, yield_count);
+    tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
+
+    tprintf(&procterm, "spurious IRQ:%5d", spurious_irq_ct);
+    tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
+
     tprintf(&procterm, "== Process status ==");
     tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
 
-    /*
-     * Here you can print a process table. You can use the tprintf (terminal
-     * printf) function to print to the designated part of the screen.
-     *
-     * tprintf supports some ANSI escape codes. There are examples above and
-     * below. I recommend using the EL (Erase Line) command to end each row
-     * you print, to erase anything leftover from the text that was printed
-     * there last time.
-     */
-    todo_noop();
+    static const char *status[] = {
+        [STATUS_FIRST_TIME] = "1st",
+        [STATUS_READY]      = "Run",
+        [STATUS_BLOCKED]    = "Blk",
+        [STATUS_EXITED]     = "Exd"
+    };
+
+    /* Column widths. Use negative for left-align, 0 to skip. */
+    static const int W_PID     = 3;
+    static const int W_TYPE    = -4;
+    static const int W_STATUS  = -3;
+    static const int W_KSTACK  = 5;
+
+    tprintf(&procterm, "%*s", W_PID, "Pid");
+    tprintf(&procterm, " %*s", W_TYPE, "Type");
+    tprintf(&procterm, " %*s", W_STATUS, "St");
+    if (W_KSTACK) tprintf(&procterm, " %*s", W_KSTACK, "KStck");
+    tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
+
+    /* Print the process table. */
+    nointerrupt_enter();
+    for (struct pcb *p = pcb; p < pcb + PCB_TABLE_SIZE; p++) {
+        /* Skip unused and existed threads. */
+        if (p->pid == 0 || p->status == STATUS_EXITED) continue;
+
+        tprintf(&procterm, "%*d", W_PID, p->pid);
+        tprintf(&procterm, " %*s", W_TYPE, p->is_thread ? "Thrd" : "Proc");
+        tprintf(&procterm, " %*s", W_STATUS, status[p->status]);
+        if (W_KSTACK) tprintf(&procterm, " %*x", W_KSTACK, p->kernel_stack);
+        tprintf(&procterm, ANSIF_EL "\n",
+                ANSI_EFWD); // Clear right, then newline
+    }
 
     /* Clear rest of window below cursor. */
     tprintf(&procterm, ANSIF_ED, ANSI_EFWD);
+
+    nointerrupt_leave();
+
 }
 

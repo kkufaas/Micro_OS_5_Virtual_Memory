@@ -16,10 +16,6 @@
 
 /* === OS-defined physical addresses === */
 
-/* Syscalls via agreed-upon fixed memory location.
- * This location will hold a pointer to the kernel's syscall entry function. */
-#define SYSCALL_ENTRY_FN_PTR_PADDR 0xf00
-
 /* The bootblock should relocate itself to this address,
  * in case 0x7c00 gets clobbbered. */
 #define BOOTBLOCK_RELO_PADDR 0x0e00 // After Real-Mode interrupt table.
@@ -28,8 +24,8 @@
 #define KERNEL_PADDR 0x1000
 
 /* Where to load processes */
-#define PROC1_PADDR 0x6000
-#define PROC2_PADDR 0xa000
+#define PROC1_PADDR 0x10000
+#define PROC2_PADDR 0x14000
 
 /* Working stack for the bootblock and for kernel initialization */
 #define STACK_PADDR 0x80000
@@ -39,5 +35,26 @@
 #define T_KSTACK_AREA_MAX_PADDR 0x80000
 #define T_KSTACK_SIZE_EACH      0x1000
 #define T_KSTACK_START_OFFSET   0x0ffc
+
+/* === Interrupt vectors === */
+
+/* Vectors 0--31 are reserved for the CPU itself. */
+
+/*
+ * CPU interrupt vector for hardware IRQ 0
+ *
+ * External hardware interrupt requests (IRQs) are numbered in relation to the
+ * lines coming in to the interrupt controller. These IRQ numbers have to be
+ * mapped to CPU interrupt vector numbers.
+ *
+ * This constant controls that mapping.
+ */
+#define IVEC_IRQ_0 32 /* Vectors 32--47 will be IRQs 0--15 */
+
+/* CPU interrupt vector for system calls */
+#define IVEC_SYSCALL 48
+
+/* Size of Interrupt Desscriptor Table (end of used interrupt vectors) */
+#define IDT_SIZE 49
 
 #endif /* ADDRS_H */

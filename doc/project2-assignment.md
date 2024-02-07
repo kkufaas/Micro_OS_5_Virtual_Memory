@@ -6,6 +6,7 @@
   - [Detailed Requirements and Hints](#detailed-requirements-and-hints)
   - [Design review](#design-review)
   - [Groups of two](#groups-of-two)
+  - [Report](#report)
   - [Hand-in](#hand-in)
   - [Useful resources](#useful-resources)
 
@@ -183,6 +184,25 @@ acceptable.
 
 You must work and hand-in in groups of two.
 
+# Report
+
+You must write a short technical report about your work, to be handed in
+with your code. The report should give an overview of how you solved
+each task (including extra challenges), how you have tested your code,
+and any known bugs or issues. In addition you need to describe the
+methodology, results, and conclusions for your performance measurements.
+
+  - The report should follow the format of a scientific paper:
+    Introduction, Methods, Results, and Discussion
+    ([IMRaD](https://en.wikipedia.org/wiki/IMRAD)).
+  - The report should be around four pages long.
+  - The report should be in PDF format.
+
+We discourage the use of ChatGPT or other AI tools for your report. We
+prefer that you practice writing for yourselves. But we do not ban these
+tools. If you do use ChatGPT or some other AI tool, we expect you to
+declare that in your report and explain how you used it.
+
 # Hand-in
 
 This project is a mandatory assignment. It will be graded pass/fail by
@@ -193,17 +213,8 @@ and upload it to the Canvas page for the assignment.
 
 You should hand in:
 
-1.  A report, maximum 4 pages that gives overview of how you solved each
-    task (including extra credits), how you have tested your code, and
-    any known bugs or isseues. In addition you need to describe the
-    methodology, results, and conclusions for your performance
-    measurements.
-    
-      - The report should include your name and UiT e-mail.
-      - The four page limit includes everything.
-      - The report should be in PDF format.
-      - The report should be in a `report/` directory in your
-        repository.
+1.  Your report. Place the report PDF in a subdirectory of your
+    repository called `report/`
 
 2.  Your code repository. Zip up and hand in the entire repository
     (working tree + `.git/` directory), not just a snapshot of the code.

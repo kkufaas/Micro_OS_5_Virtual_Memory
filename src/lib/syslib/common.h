@@ -31,6 +31,10 @@ typedef long int off_t; // Used for file sizes.
 enum {
     SYSCALL_YIELD,
     SYSCALL_EXIT,
+    SYSCALL_GETPID,
+    SYSCALL_GETPRIORITY,
+    SYSCALL_SETPRIORITY,
+    SYSCALL_CPUSPEED,
     SYSCALL_COUNT
 };
 

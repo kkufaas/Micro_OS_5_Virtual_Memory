@@ -233,6 +233,65 @@ static inline void load_cs(const segment_selector_t s)
 #define interrupts_disable() asm inline volatile("cli")
 #define interrupts_enable()  asm inline volatile("sti")
 
+typedef uint8_t interrupt_vector_t;
+
+/* Trigger a software interrupt */
+static inline void interrupt_trigger(interrupt_vector_t vec)
+{
+    asm inline volatile("int	%0" : : "n"(vec));
+}
+
+enum interrupt_vector {
+    /*             Mnemonic | Description                   | Type      | Err
+     *             ---------|-------------------------------|-----------|----*/
+    IVEC_DE  = 0,  // #DE | Divide error                  | Fault     | No
+    IVEC_DB  = 1,  // #DB | Debug Exception               | Fault/Trap| No
+    IVEC_NMI = 2,  //  -- | Non-Maskable Interrupt        | Interrupt | No
+    IVEC_BP  = 3,  // #BP | Breakpoint                    | Trap      | No
+    IVEC_OF  = 4,  // #OF | Overflow                      | Trap      | No
+    IVEC_BR  = 5,  // #BR | BOUND Range exceeded          | Fault     | No
+    IVEC_UD  = 6,  // #UD | Undefined Opcode              | Fault     | No
+    IVEC_NM  = 7,  // #NM | No Math coprocessor           | Fault     | No
+    IVEC_DF  = 8,  // #DF | Double Fault                  | Abort     | Yes
+    IVEC_CSO = 9,  //  -- | Coprocess or Segment Overrun  | Fault     | No
+    IVEC_TS  = 10, // #TS | Invalid TSS                   | Fault     | Yes
+    IVEC_NP  = 11, // #NP | Segment Not Present           | Fault     | Yes
+    IVEC_SS  = 12, // #SS | Stack-Segment fault           | Fault     | Yes
+    IVEC_GP  = 13, // #GP | General Protection fault      | Fault     | Yes
+    IVEC_PF  = 14, // #PF | Page Fault                    | Fault     | Yes
+    /*           15           (reserved) */
+    IVEC_MF = 16, // #MF | Math Fault                    | Fault     | No
+    IVEC_AC = 17, // #AC | Alignment Check               | Fault     | Yes
+    IVEC_MC = 18, // #MC | Machine Check                 | Fault     | No
+    IVEC_XM = 19, // #XM | SIMD Exception                | Fault     | No
+    IVEC_VE = 20, // #VE | Virtualization Exception      | Fault     | No
+    IVEC_CP = 21, // #CP | Control Protection Exception  | Fault     | Yes
+    /*          22-31        (reserved) */
+    IVEC_USER_START = 32,  // (start of vectors available to the OS)
+    IVEC_MAX        = 255, // (max interrupt vector)
+};
+
+/* Expands to a struct initialization for an interrupt gate descriptor */
+#define igate_init(selector, offset, dpl, flags) \
+    (struct descriptor) \
+    { \
+        .low_w   = (uint16_t) ((uint32_t) offset) & 0xffff, \
+        .high_w  = (uint16_t) (selector), \
+        .high_dw = (uint32_t) (((uint32_t) offset) & GD_OFFSET_31_16) \
+                   | ((flags) &SD_FLAGS) | ((dpl) << 13 & SD_DPL) \
+                   | GD_INT_32, \
+    }
+
+struct interrupt_frame {
+    uintptr_t ip;    // Instruction pointer
+    ureg_t    cs;    // Code Segment selector
+    ureg_t    flags; // Flags register
+
+    /* These fields are only pushed if there is a stack switch. */
+    uintptr_t sp; // Stack Pointer
+    ureg_t    ss; // Stack Segment selector
+};
+
 /*
  * LTR: Load Task Register
  */

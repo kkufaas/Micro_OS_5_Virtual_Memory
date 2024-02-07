@@ -8,6 +8,7 @@
 
 #include <syslib/compiler_compat.h>
 
+ATTR_CALLED_FROM_ISR
 noreturn void abortk();
 
 ATTR_PRINTFLIKE(3, 4)

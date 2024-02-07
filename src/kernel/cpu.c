@@ -25,6 +25,12 @@ static struct descriptor gdt[] = {
         [GI_KERNEL_DATA] = data_sd(PL_KERNEL, SD_DATA | DS_W),
 };
 
+/*
+ * Pseudo-descriptor used to load the GDT address into the GDT register
+ *
+ * Like the GDT itself, we initialize this at compile time so that startup
+ * assembly code can use it right away.
+ */
 struct pseudo_descriptor gdt_desc = {
         .base_addr = gdt,
         .limit     = sizeof(gdt),
@@ -32,5 +38,8 @@ struct pseudo_descriptor gdt_desc = {
 
 void init_cpu(void)
 {
+    /* The static GDT in this file has already been installed by the
+     * startup code in kernel_start.S, so no further initialization is
+     * needed for that. */
 }
 

@@ -10,7 +10,7 @@
 
 #include <syslib/common.h>
 
-void delay(uint32_t val);
+void ms_delay(uint32_t msecs);
 uint64_t read_cpu_ticks(void);
 
 int same_string(char *s1, char *s2);

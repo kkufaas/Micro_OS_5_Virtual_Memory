@@ -17,7 +17,8 @@
 
 #include <stddef.h>
 
-#include "kernel.h"
+#include "hardware/intctl_8259.h"
+#include "cpu.h"
 #include "scheduler.h"
 
 /*
@@ -63,6 +64,14 @@ void foo()
     ASM_CONST(STATUS_BLOCKED);
     ASM_CONST(STATUS_EXITED);
 
-    ASM_OFFSET(PCB_NEXT, struct pcb, next);
+    ASM_EQU(IRQ_TIMER, IRQ_TIMER);
+
+    ASM_OFFSET(PCB_IS_THREAD, struct pcb, is_thread);
+    ASM_OFFSET(PCB_START_PC, struct pcb, start_pc);
+    ASM_OFFSET(PCB_STATUS, struct pcb, status);
+    ASM_OFFSET(PCB_USER_STACK, struct pcb, user_stack);
+    ASM_OFFSET(PCB_KERNEL_STACK, struct pcb, kernel_stack);
+
+    ASM_OFFSET(PCB_NESTED_COUNT, struct pcb, nested_count);
 
 }

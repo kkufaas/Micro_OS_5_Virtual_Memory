@@ -5,6 +5,7 @@
 #include "../hardware/cpu_x86.h"
 #include "printk.h"
 
+ATTR_CALLED_FROM_ISR
 noreturn void abortk()
 {
     kprintf(LOG_ERROR, "halting\n");

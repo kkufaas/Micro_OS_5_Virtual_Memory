@@ -67,6 +67,7 @@ struct termwin {
 };
 
 enum termwin_overflow {
+    TERM_OF_CLIP,
     TERM_OF_SCROLL,
     TERM_OF_GROW,
 };

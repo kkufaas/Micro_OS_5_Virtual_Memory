@@ -12,6 +12,7 @@ UiT The Arctic University of Norway
       - [Display memory](#display-memory)
       - [BIOS Int 0x13 Function 2](#bios-int-0x13-function-2)
       - [BIOS Int 0x10 Function 0x0e](#bios-int-0x10-function-0x0e)
+  - [Other resources](#other-resources)
 
 # Demo Project
 
@@ -194,3 +195,38 @@ Returns:
 For more information see documentation at Stanislav’s Interrupt List for
 [INT 10 - Video BIOS
 Services](https://stanislavs.org/helppc/int_10.html).
+
+# Other resources
+
+Here are some extra links for learning more about PC boot processes, if
+you are interested.
+
+  - The YouTube channel Dave’s Garage has a good video about how a PC
+    boots.
+    
+    Dave’s Garage  
+    “How Computers BOOT: From Startup to Viruses”  
+    <https://youtu.be/rmgla4yeCXw>
+
+  - In the lectures, we’ve talked about how early computers had a kind
+    of proto-OS/proto-BIOS called a *monitor*. Ben Eater on YouTube has
+    a handful of videos about “Wozmon,” the monitor program that Steve
+    Wozniak wrote for the original Apple I PC. Wozmon fits into less
+    than 256 bytes but it allows users to examine memory, input bytes
+    into memory, and start other programs.
+    
+      - In this video, Eater gets Wozmon running on a breadboard
+        computer that mimics an Apple I, and gives a demo of how it
+        works.
+        
+        Ben Eater  
+        “Running Apple 1 software on a breadboard computer (Wozmon)”  
+        <https://youtu.be/HlLCtjJzHVI>
+    
+      - And in this video, Eater gives a tour through the Wozmon
+        assembly code and talks about how Woz managed to cram the
+        program into such a tiny footprint.
+        
+        Ben Eater  
+        “How Wozniak’s code for the Apple 1 works”  
+        <https://youtu.be/SpG8rgI7Hec>
