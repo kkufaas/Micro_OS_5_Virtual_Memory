@@ -11,10 +11,10 @@ typedef char          linebuf[81];
 
 static void bufstr(bufarray buf, int row, int col, char *str)
 {
+    str[80] = 0;
     for (int c = col; c < 80; c++, str++) {
         *str = buf[row][c][0];
     }
-    str[80] = 0;
 }
 
 static void fillbuf(bufarray buf, int ch)

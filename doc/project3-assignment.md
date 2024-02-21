@@ -58,9 +58,11 @@ You are required to do the following:
     variables, and barriers. The precode includes new in-kernel threads
     that will test these.
 
-6.  Implement a fair solution to the dining philosophers, and use
-    condition variables in your implementation. A solution is “fair”
-    when all philosophers can eat for the same amount of time.
+6.  Improve the precode’s solution to the Dining Philosophers problem.
+    This solution is not fair. What makes it unfair? How does this
+    relate to the concept of *starvation*. How would you make it more
+    fair? Tell us about this in your report. Update the existing
+    solution to make it more fair.
 
 ## Extra Challenges
 
@@ -71,9 +73,18 @@ through during the exam.
 
 1.  Implement priority scheduling and demonstrate it with the processes
     provided by us (`process1`, the plane).
+    
+      - The plane process (process1.c) uses the new `setpriority`
+        syscall
+      - Implement priority scheduling: you should then see the plane’s
+        speed change
 
 2.  Re-implement dining philosophers on Linux using the pthreads
     library.
+    
+      - There is no precode for this
+      - Set up a simple C project and write your own dining philosphers
+        simulation
 
 ## Precode Files
 
@@ -98,7 +109,7 @@ New and important precode files:
 | \+ | **kernel/interrupt\_asm.S**    | Low-level interrupt handler code in assembly    |
 | \+ | kernel/interrupt.c             | Higher-level interrupt code in C                |
 | \+ | kernel/interrupt.h             |                                                 |
-| \+ | kernel/philosophers.c          |                                                 |
+| \+ | **kernel/philosophers.c**      | The Dining Philosophers                         |
 | \+ | kernel/philosophers.h          |                                                 |
 |    | kernel/scheduler\_asm.S        | Low-level scheduler code in assembly            |
 |    | **kernel/scheduler.c**         | Higher-level scheduler code in C                |
@@ -139,9 +150,13 @@ scheduling. You need to review the techniques discussed in class. Note
 that you can use less complex primitives to implement more complex ones.
 
 To implement a fair solution to the dining philosophers, modify
-`philosophers.c`. To get full credits on this part of the project, you
-must document why your solution is fair (both in theory, and by showing
-it “live” when your OS runs), using condition variables.
+`philosophers.c`. Document why your solution is fair. The Dining
+Philosophers problem is a classic problem in synchronization and there
+are many solutions to be found if you search for them. If you base your
+solution on an existing solution, be sure to document it. The Dining
+Philosophers are usually implemented using semaphores, but you are not
+limited to semaphores. You may use locks, condition variables, barriers,
+anything you like, if you think it will lead to a better solution.
 
 # Report
 
