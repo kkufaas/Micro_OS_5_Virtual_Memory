@@ -71,8 +71,7 @@ boot/bootblock: LDFLAGS += -Ttext 0x0
 kernel/kernel: LDFLAGS += -Ttext $(call extractaddr,KERNEL_PADDR)
 
 # Linking processes on target
-process/process1: LDFLAGS += -Ttext $(call extractaddr,PROC1_PADDR)
-process/process2: LDFLAGS += -Ttext $(call extractaddr,PROC2_PADDR)
+$(PROCESSES): LDFLAGS += -Ttext $(call extractaddr,PROCESS_VADDR)
 $(PROCESSES): $(STARTFILES)#	Depend on and include our start files
 $(PROCESSES): -lc#		Link against our libc
 $(PROCESSES): -lsys#		Link agsint our kernel syscalls

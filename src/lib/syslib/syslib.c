@@ -87,3 +87,34 @@ void setpriority(int p) { invoke_syscall1(SYSCALL_SETPRIORITY, p); }
 
 int cpuspeed(void) { return invoke_syscall0(SYSCALL_CPUSPEED); }
 
+int mbox_open(int key) { return invoke_syscall1(SYSCALL_MBOX_OPEN, key); }
+
+int mbox_close(int q) { return invoke_syscall1(SYSCALL_MBOX_CLOSE, q); }
+
+int mbox_stat(int q, int *count, int *space)
+{
+    return invoke_syscall3(SYSCALL_MBOX_STAT, q, count, space);
+}
+
+int mbox_recv(int q, msg_t *m)
+{
+    return invoke_syscall2(SYSCALL_MBOX_RECV, q, m);
+}
+
+int mbox_send(int q, msg_t *m)
+{
+    return invoke_syscall2(SYSCALL_MBOX_SEND, q, m);
+}
+
+int getchar(int *c) { return invoke_syscall1(SYSCALL_GETCHAR, c); }
+
+int readdir(unsigned char *buf)
+{
+    return invoke_syscall1(SYSCALL_READDIR, buf);
+}
+
+int loadproc(int location, int size)
+{
+    return invoke_syscall2(SYSCALL_LOADPROC, location, size);
+}
+

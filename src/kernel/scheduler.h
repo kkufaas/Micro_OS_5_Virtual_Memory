@@ -5,24 +5,31 @@
 
 #include <syslib/common.h>
 
+#include "hardware/cpu_x86.h"
 #include "pcb.h"
+#include "sync.h"
 
 enum thread_status {
     STATUS_FIRST_TIME = 0,
     STATUS_READY,
+    STATUS_SLEEPING,
     STATUS_BLOCKED,
     STATUS_EXITED,
 };
+
+/*
+ * CPU flags to use when starting a new thread/process
+ *
+ * - IOPL 0: only kernel can use I/O ports
+ * - IF: interrupts enabled
+ */
+static const ureg_t INIT_EFLAGS = ((PL0 << EFLAGS_IOPL_SHIFT) | EFLAGS_IF);
 
 /* The currently running process, and also a pointer to the ready queue */
 extern pcb_t *current_running;
 
 /* Low-level dispatch to next task. Defined in assembly. */
 void dispatch(void);
-
-/* Total number of preemptions and yields */
-extern int preempt_count;
-extern int yield_count;
 
 /* Calls scheduler to run the 'next' process */
 void yield(void);

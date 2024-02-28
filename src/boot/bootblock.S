@@ -1,11 +1,11 @@
 /* === Options to switch code on and off === */
 
-	.equ	RELOCATE_SELF,		1
+	.equ	RELOCATE_SELF,		0
 	.equ	PASS_KERNEL_PARAMS,	0
 
-	.equ	DEBUG_GEOMETRY,		1
-	.equ	DEBUG_LOAD_DST,		1
-	.equ	DEBUG_LOAD_VALUE,	1
+	.equ	DEBUG_GEOMETRY,		0
+	.equ	DEBUG_LOAD_DST,		0
+	.equ	DEBUG_LOAD_VALUE,	0
 	.equ	DEBUG_NO_LAUNCH_KERNEL,	0
 
 

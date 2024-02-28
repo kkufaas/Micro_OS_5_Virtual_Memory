@@ -7,7 +7,32 @@
 #include "pcb.h"
 #include "scheduler.h"
 #include "th1.h"
+#include "mbox.h"
+#include "sleep.h"
 #include "time.h"
+#include "usb/scsi.h"
+#include "usb/usb_hub.h"
+
+/*
+ * This thread is started to load the user shell, which is the first
+ * process in the directory.
+ */
+void loader_thread(void)
+{
+    uint8_t             buf[SECTOR_SIZE]; /* buffer to hold directory */
+    struct directory_t *dir = (struct directory_t *) buf;
+
+    /* Wait until USB subsystem has been initialized */
+    while (!scsi_up()) yield();
+
+    /* read process directory sector into buf */
+    readdir(buf);
+    /* only load the first process, we assume it's the shell */
+    if (dir->location != 0) {
+        loadproc(dir->location, dir->size);
+    }
+    exit();
+}
 
 static struct term clockterm = CLOCK_TERM_INIT;
 
@@ -37,8 +62,19 @@ void clock_thread(void)
                 ANSI_EFWD); // Clear right, then return
 
         print_pcb_table();
-
+        print_mbox_status();    // Warning: May clash with other displays
         yield();
     }
 }
 
+/*
+ * This thread periodically scans USB hub ports for new connected
+ * devices.
+ */
+void usb_thread(void)
+{
+    while (1) {
+        msleep(100);
+        usb_hub_scan_ports();
+    }
+}

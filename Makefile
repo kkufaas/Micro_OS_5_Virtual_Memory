@@ -47,10 +47,14 @@ BOOTBLOCK	= target/boot/bootblock
 KERNEL		= target/kernel/kernel
 
 # List of processes
+PROCESSES += target/process/shell
 PROCESSES += target/process/process1
 PROCESSES += target/process/process2
+PROCESSES += target/process/process3
+PROCESSES += target/process/process4
 
-CREATEIMAGE_FLAGS += --extended
+#CREATEIMAGE_FLAGS += --extended
+CREATEIMAGE_FLAGS += --vm
 
 image: $(CREATEIMAGE) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)
 	$(CREATEIMAGE) $(CREATEIMAGE_FLAGS) $(BOOTBLOCK) $(KERNEL) $(PROCESSES)

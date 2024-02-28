@@ -4,6 +4,7 @@
 #ifndef _SYNC_H
 #define _SYNC_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include <syslib/common.h>
@@ -23,7 +24,8 @@ ATTR_EASY_ASM_CALL unsigned int nointerrupt_count(void);
 /* === Spinlock with busy waiting === */
 
 struct _spinlock {
-    /* TODO: design your spinlock struct. */
+    volatile int locked;
+    atomic_flag  flag;
 };
 
 typedef struct _spinlock spinlock_t;
@@ -40,6 +42,7 @@ void spinlock_release(spinlock_t *s);
 struct _lock {
     bool         locked;
     pcb_t       *wait_queue;
+    spinlock_t   inner_lock;
 };
 
 typedef struct _lock lock_t;
@@ -54,7 +57,8 @@ void lock_release(lock_t *);
 /* === Condition variable === */
 
 struct _condvar {
-    /* TODO: Design your condition variable struct */
+    pcb_t       *wait_queue;
+    spinlock_t   inner_lock;
 };
 
 typedef struct _condvar condition_t;
@@ -70,13 +74,16 @@ void condition_broadcast(condition_t *c);
 /* === Semaphore === */
 
 struct _semaphore {
-    /* TODO: Design your semaphore struct */
+    int          value;
+    pcb_t       *wait_queue;
+    spinlock_t   inner_lock;
 };
 
 typedef struct _semaphore semaphore_t;
 
 #define SEMAPHORE_INIT(VAL) \
     { \
+        .value = VAL \
     }
 
 void semaphore_up(semaphore_t *s);
@@ -86,13 +93,21 @@ void semaphore_down(semaphore_t *s);
 
 /* Barrier struct, for a simple shared variable barrier */
 struct _barrier {
-    /* TODO: Design your barrier struct */
+    condition_t  all_arrived;
+    lock_t       mutex;
+    int          threads; /* Number of threads to wait for */
+    int          count1;  /* Used when counting up */
+    int          count2;  /* Used when counting down */
+    /* Which counter to use */
+    int count_up; /* 1: up, 0: down */
 };
 
 typedef struct _barrier barrier_t;
 
 #define BARRIER_INIT(N) \
     { \
+        .threads = N, .count_up = 1, .mutex = LOCK_INIT, \
+        .all_arrived = CONDITION_INIT, \
     }
 
 /*

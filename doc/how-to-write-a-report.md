@@ -1,9 +1,10 @@
   - [Report Guidelines for INF-2201](#report-guidelines-for-inf-2201)
   - [Suggested Scientific Paper
     Structure](#suggested-scientific-paper-structure)
-  - [Typesetting with LaTeX](#typesetting-with-latex)
-  - [Sources](#sources)
+  - [Citations and Sources](#citations-and-sources)
       - [Source Quality](#source-quality)
+  - [Advice on Writing in General](#advice-on-writing-in-general)
+  - [Typesetting with LaTeX](#typesetting-with-latex)
 
 As you learn to write code, it is also important to learn how to write
 *about* your code. The reports you write alongside your assignments are
@@ -30,6 +31,13 @@ a good chance to practice this kind of writing.
     strictly enforced. It is okay to go over or under, but if your
     report strays too far from the recommended length it is probably a
     bad sign.
+
+  - **Citations: required**
+    
+    You must cite your sources. You will not necessarily have to do a
+    lot of research in this class, but when you talk about operating
+    systems concepts in your report, we expect you to cite the source of
+    your information, even if it is just the textbook.
 
   - **File format: PDF**
     
@@ -147,6 +155,78 @@ narrow, you may not have a lot of content for every section listed. In
 that case you may shorten or combine sections, but try to follow the
 spirit of the template.
 
+# Citations and Sources
+
+Of course, you must cite the sources of information that you include in
+your report. We encourage you to do a little more research into the
+concepts and systems that we are studying and implementing, and to
+include that research in your report.
+
+When you first search for information, you will probably first find
+overviews like Wikipedia and tutorial sites. It is fine to use these to
+get started in learning about a topic, but you should try to dig beyond
+such sites to more authoritative sources. Where did the tutorial page
+get their information? Luckily, Wikipedia articles for computer science
+concepts often have links to the original papers that described or
+introduced them. Follow those links\!
+
+Also, when you read a paper, look closely at the papers they cite. A
+well-written pair of Background and Related Works sections will be a
+crash course in the state of the art of the topic at the time the paper
+was written. Follow those links\!
+
+## Source Quality
+
+  - Best: peer-reviewed academic sources
+    
+    The top publishers of computer science research are
+    [USENIX](https://www.usenix.org/), [the Association for Computing
+    Machinery (ACM)](https://dl.acm.org/), and [the Institute of
+    Electrical and Electronics Engineers
+    (IEEE)](https://ieeexplore.ieee.org/Xplore/home.jsp). They have vast
+    libraries of computer science papers that you can access from the
+    campus networks.
+
+  - Good: books
+
+  - Good: well-known newspapers/magazines, especially if they have
+    well-maintained online archives
+
+  - Beware of link rot. Look for DOIs
+    
+    Beware of URLs that may change or disappear over time, such as the
+    homepage of a company or software project.
+    
+    Most modern peer-reviewed papers will have a [*Digital Object
+    Identifier
+    (DOI)*](https://en.wikipedia.org/wiki/Digital_object_identifier)
+    that is a more permanent link to that document in a reliable
+    archive.
+
+  - Useful as side sources: interviews or blogs from key people
+
+  - Sloppy: Wikipedia, tutorial pages
+
+The ideals to look for in a source are:
+
+  - [x] Peer reviewed
+  - [x] Unchanging
+  - [x] Reliably archived
+
+# Advice on Writing in General
+
+The short paper “The ABC of academic writing: non-native speakers’
+perspective”
+([doi:10.1016/j.tree.2024.01.008](https://doi.org/10.1016/j.tree.2024.01.008))
+offers some concise writing advice that is especially geared towards
+those who are not native English speakers. This paper comes from the
+field of ecology, but the general advice for writing should also apply
+well to computer science.
+
+Note that the paper recommends bouncing ideas off an AI tool like
+ChatGPT. Remember that if you use ChatGPT or other LLM/AI tool, you must
+disclose that and explain how you used it.
+
 # Typesetting with LaTeX
 
 We recommend that you begin using LaTeX to typeset your reports. LaTeX
@@ -219,61 +299,3 @@ wealth of information online. Good places to start include:
     development. They have many links to tools and documentation, and
     their journal [TUGboat](https://tug.org/TUGboat/) is the hub of TeX
     research and development.
-
-# Sources
-
-Of course, you should cite the sources of information that you include
-in your report. We encourage you to do a little more research into the
-concepts and systems that we are studying and implementing, and to
-include that research in your report.
-
-When you first search for information, you will probably first find
-overviews like Wikipedia and tutorial sites. It is fine to use these to
-get started in learning about a topic, but you should try to dig beyond
-such sites to more authoritative sources. Where did the tutorial page
-get their information? Luckily, Wikipedia articles for computer science
-concepts often have links to the original papers that described or
-introduced them. Follow those links\!
-
-Also, when you read a paper, look closely at the papers they cite. A
-well-written pair of Background and Related Works sections will be a
-crash course in the state of the art of the topic at the time the paper
-was written. Follow those links\!
-
-## Source Quality
-
-  - Best: peer-reviewed academic sources
-    
-    The top publishers of computer science research are
-    [USENIX](https://www.usenix.org/), [the Association for Computing
-    Machinery (ACM)](https://dl.acm.org/), and [the Institute of
-    Electrical and Electronics Engineers
-    (IEEE)](https://ieeexplore.ieee.org/Xplore/home.jsp). They have vast
-    libraries of computer science papers that you can access from the
-    campus networks.
-
-  - Good: books
-
-  - Good: well-known newspapers/magazines, especially if they have
-    well-maintained online archives
-
-  - Beware of link rot. Look for DOIs
-    
-    Beware of URLs that may change or disappear over time, such as the
-    homepage of a company or software project.
-    
-    Most modern peer-reviewed papers will have a [*Digital Object
-    Identifier
-    (DOI)*](https://en.wikipedia.org/wiki/Digital_object_identifier)
-    that is a more permanent link to that document in a reliable
-    archive.
-
-  - Useful as side sources: interviews or blogs from key people
-
-  - Sloppy: Wikipedia, tutorial pages
-
-The ideals to look for in a source are:
-
-  - [x] Peer reviewed
-  - [x] Unchanging
-  - [x] Reliably archived

@@ -292,12 +292,93 @@ struct interrupt_frame {
     ureg_t    ss; // Stack Segment selector
 };
 
+/* === Task-State Segment (TSS) === */
+
+/*
+ * Task-State Segment (TSS)
+ *
+ * See Intel Vol 3, §8.2.1, Task-State Segment (TSS)
+ */
+struct ATTR_PACKED tss {
+    uint32_t backlink;
+    uint32_t esp0; // Stack for privilege level 0
+    uint16_t ss0;
+    uint16_t _reserved0;
+    uint32_t esp1; // Stack for privilege level 1
+    uint16_t ss1;
+    uint16_t _reserved1;
+    uint32_t esp2; // Stack for privilege level 2
+    uint16_t ss2;
+    uint16_t _reserved2;
+    uint32_t cr3;
+    uint32_t eip;
+    uint32_t eflags;
+    uint32_t eax;
+    uint32_t ecx;
+    uint32_t edx;
+    uint32_t ebx;
+    uint32_t esp;
+    uint32_t ebp;
+    uint32_t esi;
+    uint32_t edi;
+    uint16_t es;
+    uint16_t _reserved3;
+    uint16_t cs;
+    uint16_t _reserved4;
+    uint16_t ss;
+    uint16_t _reserved5;
+    uint16_t ds;
+    uint16_t _reserved6;
+    uint16_t fs;
+    uint16_t _reserved7;
+    uint16_t gs;
+    uint16_t _reserved8;
+    uint16_t ldt_selector;
+    uint16_t _reserved9;
+    uint16_t debug_trap;
+    uint16_t iomap_base;
+};
+
 /*
  * LTR: Load Task Register
  */
 static inline void ltr(segment_selector_t selector)
 {
     asm volatile("ltr %0" ::"mr"(selector));
+}
+
+/* === Virtual Memory === */
+
+/* Install page directory */
+static inline void set_page_directory(ureg_t *pagedir)
+{
+    asm volatile("movl %0, %%cr3 " ::"r"(pagedir));
+}
+
+/* This function enables paging by setting CR0[31] to 1. */
+static inline void enable_paging()
+{
+    ureg_t tmp;
+    asm inline volatile(
+            "movl	%%cr0,	%0\n"
+            "orl	$0x80000000,	%0\n"
+            "movl	%0,	%%cr0\n"
+            : "=r"(tmp)
+    );
+}
+
+/* Read page-fault address from the CR2 register */
+static inline uintptr_t load_page_fault_addr()
+{
+    uintptr_t cr2;
+    asm inline volatile("mov	%%cr2,	%0" : "=r"(cr2));
+    return cr2;
+}
+
+/* Invalidate page that contains the given virtual address */
+static inline void invalidate_page(uintptr_t *vaddr)
+{
+    asm volatile("invlpg %0" : : "m"(vaddr));
 }
 
 /* === I/O === */

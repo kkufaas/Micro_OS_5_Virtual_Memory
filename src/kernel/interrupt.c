@@ -52,9 +52,15 @@ static void dump_exception(
     /* Info from current process */
     pr_dump("PID %d\n", current_running->pid);
     pr_dump("Nested count %d\n", current_running->nested_count);
+    pr_dump("Yields %d\n", current_running->yield_count);
+    pr_dump("Preemptions %d\n", current_running->preempt_count);
+    pr_dump("Hardware mask %x\n", current_running->int_controller_mask);
 
     /* Additional info for specific interrupts */
     switch (vector) {
+    case IVEC_PF:
+        pr_dump("CR2 (fault addr) %x\n", load_page_fault_addr());
+        break;
     }
 }
 
@@ -145,6 +151,12 @@ void handle_spurious_irq(struct interrupt_frame *stack_frame)
 /* === Declarations for low-level functions defined in ASM === */
 
 void timer_isr_entry(void);
+void keyboard_isr_entry(void);
+
+void pci5_entry(void);
+void pci9_entry(void);
+void pci10_entry(void);
+void pci11_entry(void);
 
 /* === Initialization === */
 
@@ -188,9 +200,18 @@ void init_idt(void)
     install_interrupt_handler(
             IVEC_IRQ_0 + IRQ_MASTER_LOWEST_PRIORITY, handle_spurious_irq, PL0
     );
+    install_interrupt_handler(
+            IVEC_IRQ_0 + IRQ_KEYBOARD, keyboard_isr_entry, PL0
+    );
+
+    /* Add handlers for PCI interrupts used by the USB driver. */
+    install_interrupt_handler(IVEC_IRQ_0 + 5, pci5_entry, PL0);
+    install_interrupt_handler(IVEC_IRQ_0 + 9, pci9_entry, PL0);
+    install_interrupt_handler(IVEC_IRQ_0 + 10, pci10_entry, PL0);
+    install_interrupt_handler(IVEC_IRQ_0 + 11, pci11_entry, PL0);
 
     /* Create gate for system calls */
-    static const int syscall_dpl = 0;
+    static const int syscall_dpl = 3;
     install_interrupt_handler(
             IVEC_SYSCALL, syscall_entry_interrupt, syscall_dpl
     );
@@ -208,6 +229,9 @@ void init_int_controller(void)
     pic_init(IVEC_IRQ_0);
     pic_set_mask(~IRQS_TO_ENABLE);
 
+    /* Set level mode interrupt detection for PCI lines ICH spec */
+    outb(0x4d0, 0x28);
+    outb(0x4d1, 0x0e);
 }
 
 void init_pit(void)

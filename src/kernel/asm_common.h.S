@@ -75,4 +75,28 @@
 	addl	$FP_STATE_SIZE,	%esp
 .endm
 
+	/*
+	 * Load kernel data segment descriptor into DS and ES
+	 *
+	 * During an interrupt, the CPU automatically switches the code segment
+	 * descriptor (CS) and the stack segment descriptor (DS). So interrupt
+	 * handlers only need to switch the data segments, and only DS and ES
+	 * are used in our kernel (they are used in C code).
+	 */
+.macro LOAD_KERNEL_DATA_SEGMENTS	scratch=%eax
+	mov	$KERNEL_DS,	\scratch
+	mov	\scratch,	%ds
+	mov	\scratch,	%es
+.endm
+
+.macro SAVE_DATA_SEGMENTS
+	push	%ds
+	push	%es
+.endm
+
+.macro	RESTORE_DATA_SEGMENTS
+	pop	%es
+	pop	%ds
+.endm
+
 #endif /* ASM_COMMON_H_S */

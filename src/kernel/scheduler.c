@@ -4,6 +4,7 @@
 #include <util/util.h>
 
 #include "hardware/cpu_x86.h"
+#include "hardware/intctl_8259.h"
 #include "cpu.h"
 #include "lib/assertk.h"
 #include "lib/printk.h"
@@ -14,6 +15,20 @@
 
 /* Ready queue and pointer to currently running process */
 pcb_t *current_running;
+
+/* Helper function for dispatch() */
+void setup_current_running(void)
+{
+    /* Restore harware interrupt mask */
+    pic_set_mask(current_running->int_controller_mask);
+
+    /* Load pointer to the page directory of current_running into CR3 */
+    set_page_directory(current_running->page_directory);
+
+    if (!current_running->is_thread) { /* process */
+        cpu_set_interrupt_stack(current_running->base_kernel_stack);
+    }
+}
 
 /*
  * Choose and dispatch next task, do maintenance on ready queue
@@ -26,8 +41,23 @@ void scheduler(void)
 {
     nointerrupt_enter();
 
+    unsigned long long t;
+
+    /*
+     * Save hardware interrupt mask in the pcb struct. The mask
+     * will be restored in setup_current_running()
+     */
+    current_running->int_controller_mask = pic_get_mask();
+
     do {
         switch (current_running->status) {
+
+        case STATUS_SLEEPING:
+            t = read_cpu_ticks();
+            if (current_running->wakeup_time < t)
+                current_running->status = STATUS_READY;
+
+            FALLTHROUGH;
 
         case STATUS_FIRST_TIME:
         case STATUS_READY:
@@ -36,10 +66,16 @@ void scheduler(void)
             break;
 
         case STATUS_BLOCKED:
-        case STATUS_EXITED:
             queue_shift(&current_running);
             assertf(current_running != NULL, "no more jobs");
             break;
+
+        case STATUS_EXITED: {
+            struct pcb *outgoing = queue_shift(&current_running);
+            assertf(current_running != NULL, "no more jobs");
+            free_pcb(outgoing);
+            break;
+        }
 
         default: assertf(0, "Invalid job status."); break;
         }
@@ -65,21 +101,21 @@ void scheduler(void)
  */
 extern void scheduler_entry(void);
 
-int preempt_count = 0;
-int yield_count   = 0;
-
 /* Call scheduler to run the 'next' process */
 void yield(void)
 {
     nointerrupt_enter();
-    yield_count++;
+    current_running->yield_count++;
     scheduler_entry();
     nointerrupt_leave();
 }
 
 void preempt(void)
 {
-    todo_noop();
+    nointerrupt_enter();
+    current_running->preempt_count++;
+    scheduler_entry();
+    nointerrupt_leave();
 }
 
 void block(pcb_t **q)

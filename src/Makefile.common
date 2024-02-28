@@ -192,6 +192,17 @@ BOOTBLOCK_OBJS += boot/bootblock.o
 boot/bootblock: $(BOOTBLOCK_OBJS)
 
 KERNEL_OBJS := $(call dirobjs,kernel/,*)
+
+### "given" precompiled object files
+#
+# Given files are compiled, completed object files that in-progress work
+# can be tested against. Uncomment these line in different combinations
+# to use different combinations of given and in-progress code.
+#KERNEL_OBJS := $(KERNEL_OBJS:kernel/mbox.o=kernel/mbox.given.o)
+#KERNEL_OBJS := $(KERNEL_OBJS:kernel/keyboard.o=kernel/keyboard.given.o)
+#KERNEL_OBJS := $(KERNEL_OBJS:kernel/sync.o=kernel/sync.given.o)
+#KERNEL_OBJS := $(KERNEL_OBJS:kernel/pcb.o=kernel/pcb.given.o)
+
 kernel/kernel: $(KERNEL_OBJS)
 kernel/kernel: -lutil#		Link against our util library
 kernel/kernel: CPPFLAGS += -D OSLIBC_CORE_ONLY
@@ -199,8 +210,11 @@ kernel/kernel: -lc_core#	Link against the core version of libc
 kernel/kernel: -lansi_term#	Link against ANSI terminal
 
 # List of processes
+PROCESSES += process/shell
 PROCESSES += process/process1
 PROCESSES += process/process2
+PROCESSES += process/process3
+PROCESSES += process/process4
 
 $(PROCESSES): -lutil#		Link against our util library
 $(PROCESSES): -lansi_term#	Link against ANSI terminal
@@ -234,17 +248,24 @@ OFFSETS_SEDFLAGS += -e '1i\# GENERATED FILE. DO NOT EDIT.\n'#	add warning
 # Correct path for asm-offsets.h.s
 #
 # When generating dependency metadata, the C Preprocessor will not know where
-# asm-offsets.h.s is supposed to go (under kernel/). Therefore, it will
+# asm-offsets.h.s is supposed to go (under ./kernel/). Therefore, it will
 # generate a dependency on just asm-offsets.h.s, with no subdirectory.
 #
-# In order to get Make to build kernel/asm-offsets.h.s, we tell it to make
-# a symlink.
-asm-offsets.h.s: kernel/asm-offsets.h.s
-	ln -f -s $< $@
+# The rules above tell Make how to build	./kernel/asm-offsets.h.s,
+# but the dependency file tells Make to build	./asm-offsets.h.s
+#
+# We need another rule to connect these two to complete the chain.
+#
+# Previously, we used a symlink here, but that can cause problems on Windows
+# hosts (WSL). So we make a copy.
+.PRECIOUS: kernel/%.h.s
+%.h.s: kernel/%.h.s
+	cp $< $@
 
 .PHONY: clean_asm_offsets
+clean: clean_asm_offsets
 clean_asm_offsets:
-	$(RM) asm-offsets.h.s kernel/asm-offsets.h.s
+	$(RM) *.h.s kernel/*.h.s
 
 # When compiling kernel objects, add the output dir to the include search path,
 # so that includes can find kernel/asm-offsets.h.s .
@@ -253,9 +274,15 @@ $(KERNEL_OBJS): CPPFLAGS += -I kernel
 # Cleanup
 # ======================================================================
 
+## Prune generated files
+# In the target and host directories, that means basically all files except
+# the Makefile and any "given" compiled object files.
+CLEAN_FIND_FLAGS += -type f,l#				Regular files and links
+CLEAN_FIND_FLAGS += -and -not -name '*.given*'#		Skip given files
+CLEAN_FIND_FLAGS += -and -not -name 'Makefile*'#	Skip Makefiles
 clean:
-	$(RM) -r boot kernel lib process
-	$(RM) createimage createimage.o
+	find * $(CLEAN_FIND_FLAGS) -delete
+	find * -empty -delete
 
 # Utilities
 # ======================================================================
@@ -318,4 +345,4 @@ include $(DEPFILES)
 .PHONY: clean_makefile_cpp_includes
 clean: clean_makefile_cpp_includes
 clean_makefile_cpp_includes:
-	$(RM) $(DEPFILES)
+	find . -name '*.d' -delete

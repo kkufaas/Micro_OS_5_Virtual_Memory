@@ -16,26 +16,30 @@
 #include "lib/printk.h"
 #include "lib/todo.h"
 #include "interrupt.h"
+#include "keyboard.h"
+#include "mbox.h"
+#include "memory.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "sync.h"
 #include "syscall.h"
 #include "time.h"
+#include "usb/scsi.h"
+#include "usb/usb.h"
 
 /* Kernel threads */
 #include "th1.h"
 #include "th2.h"
-#include "th3.h"
 #include "barrier_test.h"
 #include "philosophers.h"
 
 /* Kernel threads to start automatically */
 static uintptr_t start_thrds[] = {
+        (uintptr_t) loader_thread, /* Loads shell */
         (uintptr_t) clock_thread,  /* Running indefinitely */
+        (uintptr_t) usb_thread,    /* Scans USB hub port */
         (uintptr_t) lock_thread0,  /* Test thread */
         (uintptr_t) lock_thread1,  /* Test thread */
-        (uintptr_t) mcpi_thread0,  (uintptr_t) mcpi_thread1,
-        (uintptr_t) mcpi_thread2,  (uintptr_t) mcpi_thread3,
 
         (uintptr_t) phl_thread0,   (uintptr_t) phl_thread1,
         (uintptr_t) phl_thread2,
@@ -44,14 +48,7 @@ static uintptr_t start_thrds[] = {
         (uintptr_t) barrier3,
 };
 
-/* User processes to start automatically */
-static uintptr_t start_procs[] = {
-        (uintptr_t) PROC1_PADDR, /* given in Makefile */
-        (uintptr_t) PROC2_PADDR,
-};
-
 static const int numthrds = sizeof(start_thrds) / sizeof(uintptr_t);
-static const int numprocs = sizeof(start_procs) / sizeof(uintptr_t);
 
 /* === Kernel main === */
 
@@ -74,16 +71,25 @@ void kernel_main(void)
 
     init_pcb_table();
 
+    /* Initialize various "subsystems" */
     time_init();
+    init_memory();
+    mbox_init();
+    keyboard_init();
+    scsi_static_init();
+    usb_static_init();
 
     /* Create the threads */
     for (int i = 0; i < numthrds; i++) {
         create_thread(start_thrds[i]);
     }
-    /* Create the processes */
-    for (int i = 0; i < numprocs; i++) {
-        create_process(start_procs[i]);
-    }
+
+    /*
+     * Select the page directory of the first thread in the
+     * ready queue. Then enable paging before dispatching
+     */
+    set_page_directory(current_running->page_directory);
+    enable_paging();
 
     /* Start the first thread */
     pr_info("Beginning task dispatch...\n");

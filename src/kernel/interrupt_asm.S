@@ -22,8 +22,77 @@
 
 	.text
 
+.macro	IRQ_ENTRY_WRAPPER \
+		irqnum, wrapped_fn, pass_irqnum=0, nointerrupt_leave=0
+
+	call	nointerrupt_enter
+	SAVE_GEN_REGS
+	SAVE_FP_REGS
+	SAVE_DATA_SEGMENTS
+	LOAD_KERNEL_DATA_SEGMENTS	scratch=%eax
+
+	movl	current_running, %eax
+	incl	PCB_NESTED_COUNT(%eax)
+
+	pushl	$\irqnum
+	call	pic_mask_irq	# Mask the IRQ we are servicing.
+	call	pic_send_eoi	# Send EOI so other IRQs can come through.
+	addl	$4, %esp
+
+	/* Call the wrapped interrupt handler function. */
+
+	.if \nointerrupt_leave;
+	call	nointerrupt_leave
+	.endif
+	.if \pass_irqnum
+	push	$\irqnum	# Pass IRQ number as a parameter if requested.
+	.endif
+	call	\wrapped_fn	# Actually call the wrapped function.
+	.if \pass_irqnum
+	add	$4,	%esp	# Remove the IRQ number parameter.
+	.endif
+	.if \nointerrupt_leave
+	call	nointerrupt_enter
+	.endif
+
+	movl	current_running, %eax
+	decl	PCB_NESTED_COUNT(%eax)
+	pushl	$\irqnum
+	call	pic_unmask_irq	# Reenable this IRQ.
+	addl	$4, %esp
+	call	nointerrupt_leave_delayed
+	RESTORE_DATA_SEGMENTS
+	RESTORE_FP_REGS
+	RESTORE_GEN_REGS
+	iret
+.endm
+
 	.globl  timer_isr_entry
 timer_isr_entry:
-	/* You must add code here to handle the timer interrupt. */
-	iret
+	IRQ_ENTRY_WRAPPER	IRQ_TIMER, preempt
+
+	.globl  keyboard_isr_entry
+keyboard_isr_entry:
+	IRQ_ENTRY_WRAPPER	IRQ_KEYBOARD, keyboard_interrupt, \
+				nointerrupt_leave=1
+
+	.globl  pci5_entry
+pci5_entry:
+	IRQ_ENTRY_WRAPPER	5, pci_interrupt, pass_irqnum=1, \
+				nointerrupt_leave=1
+
+	.globl  pci9_entry
+pci9_entry:
+	IRQ_ENTRY_WRAPPER	9, pci_interrupt, pass_irqnum=1, \
+				nointerrupt_leave=1
+
+	.globl  pci10_entry
+pci10_entry:
+	IRQ_ENTRY_WRAPPER	10, pci_interrupt, pass_irqnum=1, \
+				nointerrupt_leave=1
+
+	.globl  pci11_entry
+pci11_entry:
+	IRQ_ENTRY_WRAPPER	11, pci_interrupt, pass_irqnum=1, \
+				nointerrupt_leave=1
 

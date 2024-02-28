@@ -16,25 +16,33 @@
 
 /* === OS-defined physical addresses === */
 
-/* The bootblock should relocate itself to this address,
- * in case 0x7c00 gets clobbbered. */
-#define BOOTBLOCK_RELO_PADDR 0x0e00 // After Real-Mode interrupt table.
-
 /* Where to load the kernel */
-#define KERNEL_PADDR 0x1000
-
-/* Where to load processes */
-#define PROC1_PADDR 0x10000
-#define PROC2_PADDR 0x14000
+#define KERNEL_PADDR 0x8000
 
 /* Working stack for the bootblock and for kernel initialization */
 #define STACK_PADDR 0x80000
 
 /* Physical area reserved for allocatinge kernel-level stacks for threads */
-#define T_KSTACK_AREA_MIN_PADDR 0x20000
+#define T_KSTACK_AREA_MIN_PADDR 0x40000
 #define T_KSTACK_AREA_MAX_PADDR 0x80000
-#define T_KSTACK_SIZE_EACH      0x1000
-#define T_KSTACK_START_OFFSET   0x0ffc
+#define T_KSTACK_SIZE_EACH      0x2000
+#define T_KSTACK_START_OFFSET   0x1ffc
+
+/*
+ * Physical memory area used for allocating virtual memory pages
+ *
+ * From this simple operating system's perspective, modern PCs basically have
+ * unlimited memory, so we have to artificially limit the amount of memory
+ * available if we want to see swapping in action.
+ */
+#define PAGE_SIZE 0x1000 // aka 4096 aka 4 KiB
+#define PAGING_AREA_MIN_PADDR 0x100000 /* 1MB */
+#define PAGING_AREA_MAX_PADDR 0x200000 /* 2MB */
+
+/* === OS-defined virtual addresses === */
+
+#define PROCESS_VADDR       0x1000000
+#define PROCESS_STACK_VADDR 0xeffffff0
 
 /* === Interrupt vectors === */
 

@@ -14,6 +14,8 @@ static const irqmask_t IRQS_TO_ENABLE =
         ((1 << IRQ_CASCADE) // Cascade interrupt from slave to master
          | (1 << IRQ_MASTER_LOWEST_PRIORITY) // Possible spurious interrupts
          | (1 << IRQ_TIMER)
+         | (1 << IRQ_KEYBOARD)
+         | (1 << 5) | (1 << 9) | (1 << 10) | (1 << 11) // PCI lines for USB
         );
 
 void init_int_controller(void);

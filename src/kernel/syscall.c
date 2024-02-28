@@ -11,6 +11,8 @@
 
 /* Includes necessary for syscall function prototypes. */
 
+#include "keyboard.h"
+#include "mbox.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "time.h"
@@ -45,6 +47,14 @@ static void init_syscall_jumptable(void)
     add_to_table(SYSCALL_GETPRIORITY, (syscall_t) getpriority);
     add_to_table(SYSCALL_SETPRIORITY, (syscall_t) setpriority);
     add_to_table(SYSCALL_CPUSPEED, (syscall_t) cpuspeed);
+    add_to_table(SYSCALL_MBOX_OPEN, (syscall_t) mbox_open);
+    add_to_table(SYSCALL_MBOX_CLOSE, (syscall_t) mbox_close);
+    add_to_table(SYSCALL_MBOX_STAT, (syscall_t) mbox_stat);
+    add_to_table(SYSCALL_MBOX_RECV, (syscall_t) mbox_recv);
+    add_to_table(SYSCALL_MBOX_SEND, (syscall_t) mbox_send);
+    add_to_table(SYSCALL_GETCHAR, (syscall_t) getchar);
+    add_to_table(SYSCALL_READDIR, (syscall_t) readdir);
+    add_to_table(SYSCALL_LOADPROC, (syscall_t) loadproc);
 
 #pragma GCC diagnostic pop
 

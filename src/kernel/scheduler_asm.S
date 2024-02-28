@@ -61,6 +61,7 @@ scheduler_entry:
 
 	.global dispatch
 dispatch:
+	call	setup_current_running
 	movl	current_running, %eax
 	movl	PCB_KERNEL_STACK(%eax), %esp
 	cmpl	$STATUS_FIRST_TIME, PCB_STATUS(%eax)
@@ -70,9 +71,15 @@ first_time:
 	movl	$STATUS_READY, PCB_STATUS(%eax)
 	cmpl	$1, PCB_IS_THREAD(%eax)
 	je	isathread
-	movl	PCB_USER_STACK(%eax), %esp
+	pushl	PCB_DS(%eax)
+	pushl	PCB_USER_STACK(%eax)
 isathread:
+	pushl	$INIT_EFLAGS
+	pushl	PCB_CS(%eax)
+	pushl	PCB_START_PC(%eax)
 	movb	$1,	(nointerrupt_count_val)
-	call	nointerrupt_leave
-	jmp	*PCB_START_PC(%eax)
+	call	nointerrupt_leave_delayed
+	movw	PCB_DS(%eax),%ds
+	movw	PCB_DS(%eax),%es
+	iret
 

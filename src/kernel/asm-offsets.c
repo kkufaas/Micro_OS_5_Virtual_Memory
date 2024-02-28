@@ -62,9 +62,11 @@ void foo()
     ASM_CONST(STATUS_FIRST_TIME);
     ASM_CONST(STATUS_READY);
     ASM_CONST(STATUS_BLOCKED);
+    ASM_CONST(STATUS_SLEEPING);
     ASM_CONST(STATUS_EXITED);
 
     ASM_EQU(IRQ_TIMER, IRQ_TIMER);
+    ASM_EQU(IRQ_KEYBOARD, IRQ_KEYBOARD);
 
     ASM_OFFSET(PCB_IS_THREAD, struct pcb, is_thread);
     ASM_OFFSET(PCB_START_PC, struct pcb, start_pc);
@@ -73,5 +75,9 @@ void foo()
     ASM_OFFSET(PCB_KERNEL_STACK, struct pcb, kernel_stack);
 
     ASM_OFFSET(PCB_NESTED_COUNT, struct pcb, nested_count);
+
+    ASM_CONST(INIT_EFLAGS);
+    ASM_OFFSET(PCB_DS, struct pcb, ds);
+    ASM_OFFSET(PCB_CS, struct pcb, cs);
 
 }

@@ -10,10 +10,20 @@
 #include "lib/printk.h"
 #include "lib/todo.h"
 
+#include "cpu.h"
+#include "hardware/intctl_8259.h"
 #include "interrupt.h"
+#include "memory.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "sync.h"
+
+/* Required for dynamic loading */
+
+#include <string.h>
+
+#include "usb/scsi.h"
+#include "usb/usb.h"
 
 /* === Get PCB info === */
 
@@ -189,6 +199,12 @@ static pcb_t *alloc_pcb()
     return p;
 }
 
+/* put the pcb back into the free list */
+void free_pcb(pcb_t *p)
+{
+    queue_insert(&freelist, p);
+}
+
 static void create_pcb_common(struct pcb *p)
 {
     p->pid = next_pid++;
@@ -196,11 +212,16 @@ static void create_pcb_common(struct pcb *p)
     /* allocate kernel stack */
     assertf(next_stack < T_KSTACK_AREA_MAX_PADDR, "Out of stack space");
     p->kernel_stack = next_stack + T_KSTACK_START_OFFSET;
+    p->base_kernel_stack = p->kernel_stack;
     next_stack += T_KSTACK_SIZE_EACH;
 
     p->priority = 10;
     p->status = STATUS_FIRST_TIME;
 
+    p->preempt_count = 0;
+    p->yield_count   = 0;
+
+    p->int_controller_mask = ~IRQS_TO_ENABLE;
 }
 
 /*
@@ -221,6 +242,15 @@ int create_thread(uintptr_t start_addr)
 
     p->start_pc = start_addr;
 
+    /* Kernel code segment selector, RPL = 0 (kernel mode) */
+    p->cs = KERNEL_CS;
+    p->ds = KERNEL_DS;
+
+    p->base  = 0; /* only set for processes */
+    p->limit = 0; /* only set for processes */
+    /* Sets p->page_directory = &(created page directory) */
+    setup_process_vmem(p);
+
     queue_insert(&current_running, p);
     return 0;
 }
@@ -229,8 +259,9 @@ int create_thread(uintptr_t start_addr)
  * Allocate and set up the pcb for a new process, allocate resources
  * for it and insert it into the ready queue.
  */
-int create_process(uintptr_t start_addr)
+int create_process(uint32_t base, uint32_t size)
 {
+    nointerrupt_enter();
 
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
@@ -240,15 +271,61 @@ int create_process(uintptr_t start_addr)
     p->nested_count = 0;
 
     /* setup user stack */
-    assertk(next_stack < T_KSTACK_AREA_MAX_PADDR);
-    p->user_stack = next_stack + T_KSTACK_START_OFFSET;
-    next_stack += T_KSTACK_SIZE_EACH;
+    p->user_stack =
+            PROCESS_VADDR + size - T_KSTACK_SIZE_EACH + T_KSTACK_START_OFFSET;
 
-    p->start_pc = start_addr;
+    /* Each processes has its own address space */
+    p->start_pc = PROCESS_VADDR;
+
+    /* process code segment selector, with RPL = 3 (user mode) */
+    p->cs = PROCESS_CS | 3;
+    p->ds = PROCESS_DS | 3;
+
+    p->base  = base;
+    p->limit = size;
+    setup_process_vmem(p);
 
     queue_insert(&current_running, p);
 
+    nointerrupt_leave();
     return 0;
+}
+
+/* === Dynamic Process Loading === */
+
+/*
+ * Read the directory from the USB and copy it to the user provided buf.
+ *
+ * NOTE that block size equals sector size.
+ */
+int readdir(unsigned char *buf)
+{
+    /*
+     * NOTE avoid passing 'buf'-argument directly to scsi_read(),
+     * use an intermidary buffer on the stack.
+     * This is not a problem when loader_thread() spawns the shell
+     * since that argument address is in kernel-space.
+     * The problem comes when the virtual-address argument pointer
+     * refers to something in process-space. Which is not a problem
+     * in kernel space because addresses are one-to-one with
+     * physical-address.
+     */
+    todo_use(buf);
+    todo_noop();
+    return -1;
+}
+
+/*
+ * Load a process from disk.
+ *
+ * Location is sector number on disk, size is number of sectors.
+ */
+int loadproc(int location, int size)
+{
+    todo_use(location);
+    todo_use(size);
+    todo_noop();
+    return -1;
 }
 
 /* === Print Process Status Table === */
@@ -266,9 +343,6 @@ void print_pcb_table(void)
     /* Reset to top of window and print header. */
     tprintf(&procterm, ANSIF_CUP, 1, 1);
 
-    tprintf(&procterm, "preempt:%5d, yield:%5d", preempt_count, yield_count);
-    tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
-
     tprintf(&procterm, "spurious IRQ:%5d", spurious_irq_ct);
     tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
 
@@ -279,6 +353,7 @@ void print_pcb_table(void)
         [STATUS_FIRST_TIME] = "1st",
         [STATUS_READY]      = "Run",
         [STATUS_BLOCKED]    = "Blk",
+        [STATUS_SLEEPING]   = "Slp",
         [STATUS_EXITED]     = "Exd"
     };
 
@@ -286,11 +361,15 @@ void print_pcb_table(void)
     static const int W_PID     = 3;
     static const int W_TYPE    = -4;
     static const int W_STATUS  = -3;
+    static const int W_PREEMPT = 6;
+    static const int W_YIELD   = 6;
     static const int W_KSTACK  = 5;
 
     tprintf(&procterm, "%*s", W_PID, "Pid");
     tprintf(&procterm, " %*s", W_TYPE, "Type");
     tprintf(&procterm, " %*s", W_STATUS, "St");
+    if (W_PREEMPT) tprintf(&procterm, " %*s", W_PREEMPT, "Pmpt");
+    if (W_YIELD) tprintf(&procterm, " %*s", W_YIELD, "Yld");
     if (W_KSTACK) tprintf(&procterm, " %*s", W_KSTACK, "KStck");
     tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
 
@@ -303,6 +382,8 @@ void print_pcb_table(void)
         tprintf(&procterm, "%*d", W_PID, p->pid);
         tprintf(&procterm, " %*s", W_TYPE, p->is_thread ? "Thrd" : "Proc");
         tprintf(&procterm, " %*s", W_STATUS, status[p->status]);
+        if (W_PREEMPT) tprintf(&procterm, " %*d", W_PREEMPT, p->preempt_count);
+        if (W_YIELD) tprintf(&procterm, " %*d", W_YIELD, p->yield_count);
         if (W_KSTACK) tprintf(&procterm, " %*x", W_KSTACK, p->kernel_stack);
         tprintf(&procterm, ANSIF_EL "\n",
                 ANSI_EFWD); // Clear right, then newline
