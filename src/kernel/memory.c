@@ -135,7 +135,7 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
 }
 
 uint32_t* allocate_page(void) {
-    uint32_t* page = (uint32_t*)alloc_memory(4096);
+    uint32_t* page = (uint32_t*) alloc_memory(4096);
     for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
     return page;
 }
@@ -287,7 +287,7 @@ static void setup_kernel_vmem(void)
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
     }
     // Put the address of the page table into the first entry of the page directory
-    kernel_pdir[0] = (uint32_t)kernel_ptable | PE_P | PE_RW;
+    kernel_pdir[0] = (uint32_t) kernel_ptable | PE_P | PE_RW;
 }
 
 /*
@@ -300,11 +300,12 @@ void setup_process_vmem(pcb_t *p)
 
     // Copy kernel mappings from kernel_pdir to proc_pdir
     // It simply copies the first entry to share the first 4 MB where the kernel resides
+    // TODO: this needs some more explanation
     proc_pdir[0] = kernel_pdir[0]; // Share the kernel space
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
-    proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second 4 MB of virtual space
+    proc_pdir[1] = (uint32_t) proc_ptable | PE_P | PE_RW | PE_US;
 
     // Map process pages
     for (uint32_t addr = 0x400000; addr < 0x800000; addr += 0x1000) { // The next 4 MB after kernel space
