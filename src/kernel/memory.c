@@ -77,6 +77,63 @@ void free_memory(uint32_t ptr)
     spinlock_release(&next_free_mem_lock);
 }
 
+/* == Pinned page tracking == */
+
+typedef struct PinnedPageEntry {
+    uint32_t vpn; // Virtual Page Number
+    bool pinned;  // Whether the page is pinned
+    struct PinnedPageEntry* next; // For handling collisions via chaining
+} PinnedPageEntry;
+
+PinnedPageEntry* hashTable[HASH_TABLE_SIZE];
+PinnedPageEntry* entryBlock = NULL; // Pointer to a block of entries
+size_t entriesAllocated = 0;        // Number of entries allocated from the block
+size_t entriesPerBlock = 4096 / sizeof(PinnedPageEntry); 
+
+unsigned int hashFunction(uint32_t vpn) {
+    return vpn % HASH_TABLE_SIZE;
+}
+
+PinnedPageEntry* allocateEntry() {
+    if (entryBlock == NULL || entriesAllocated >= entriesPerBlock) {
+        // Allocate a new block if needed
+        entryBlock = (PinnedPageEntry*)alloc_memory(4096); // Allocates a full page
+        entriesAllocated = 0;
+    }
+    return &entryBlock[entriesAllocated++];
+}
+
+bool isPagePinned(uint32_t vpn) {
+    unsigned int index = hashFunction(vpn);
+    PinnedPageEntry* entry = hashTable[index];
+
+    while (entry) {
+        if (entry->vpn == vpn) {
+            return entry->pinned;
+        }
+        entry = entry->next;
+    }
+
+    return false;
+}
+
+void insertPinnedPage(uint32_t vpn, bool pinned) {
+    PinnedPageEntry* newEntry = allocateEntry();
+    if (newEntry == NULL) {
+        printk("Failed to allocate memory for hash map entry\n");
+        return;
+    }
+
+    newEntry->vpn = vpn;
+    newEntry->pinned = pinned;
+    unsigned int index = hashFunction(vpn);
+
+    // Collision resolution by chaining
+    newEntry->next = hashTable[index];
+    hashTable[index] = newEntry;
+
+}
+
 /* === Page tables === */
 
 /* Use virtual address to get index in page directory.  */
