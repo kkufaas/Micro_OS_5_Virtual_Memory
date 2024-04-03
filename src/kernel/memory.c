@@ -287,7 +287,11 @@ static void setup_kernel_vmem(void)
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
     }
     // Put the address of the page table into the first entry of the page directory
-    kernel_pdir[0] = (uint32_t) kernel_ptable | PE_P | PE_RW;
+
+
+    // FIXME: NOTE: suggest we use provided helper functions to avoid uneccessary bugs
+    dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
+    //kernel_pdir[0] = (uint32_t) kernel_ptable | PE_P | PE_RW;
 }
 
 /*
@@ -301,7 +305,16 @@ void setup_process_vmem(pcb_t *p)
     // Copy kernel mappings from kernel_pdir to proc_pdir
     // It simply copies the first entry to share the first 4 MB where the kernel resides
     // TODO: this needs some more explanation
+
+    // FIXME: NOTE: suggest we use provided helper functions to avoid uneccessary bugs
     proc_pdir[0] = kernel_pdir[0]; // Share the kernel space
+
+    uint32_t kernel_size = PAGE_SIZE; // FIXME: get correct kernel size
+    assertk(kernel_size < PROCESS_VADDR);
+    for (uintptr_t current_vaddr = 0; (int) current_vaddr < kernel_size; current_vaddr += PAGE_SIZE) {
+        // maps virtual address current_vaddr to the kernel
+        dir_ins_table(proc_pdir, current_vaddr, kernel_pdir[0], kernel_pdir[0] & MODE_MASK);
+    }
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
@@ -313,6 +326,18 @@ void setup_process_vmem(pcb_t *p)
     }
     // Update the process control block (pcb_t) to point to the new page directory
     p->page_directory = proc_pdir;
+
+
+    // allocate stack area - fixed size stack areas assumed
+
+    uintptr_t stack_page = allocate_page();
+
+    // TODO: map the virtual memory to the stack area
+    // p -> user_stack?  by default p -> user_stack = PROCESS_STACK_VADDR = 0xeffffff0
+
+
+
+
 }
 
 /*
