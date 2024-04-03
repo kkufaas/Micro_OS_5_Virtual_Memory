@@ -53,5 +53,12 @@ void setup_process_vmem(pcb_t *p);
 void page_fault_handler(
         struct interrupt_frame *stack_frame, ureg_t error_code
 );
+/* Allocate a page for the kernel page directory and zero it out */
+
+uint32_t* allocate_page(void);
+
+
+/* Utility function to map a single page */
+void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode);
 
 #endif /* MEMORY_H */

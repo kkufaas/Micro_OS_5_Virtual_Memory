@@ -31,6 +31,7 @@
 #include "usb/scsi.h"
 
 #define UNUSED(x) ((void) x)
+#define HASH_TABLE_SIZE 1024
 
 /* === Simple memory allocation === */
 
@@ -120,7 +121,6 @@ bool isPagePinned(uint32_t vpn) {
 void insertPinnedPage(uint32_t vpn, bool pinned) {
     PinnedPageEntry* newEntry = allocateEntry();
     if (newEntry == NULL) {
-        printk("Failed to allocate memory for hash map entry\n");
         return;
     }
 
@@ -132,6 +132,17 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
     newEntry->next = hashTable[index];
     hashTable[index] = newEntry;
 
+}
+
+uint32_t* allocate_page(void) {
+    uint32_t* page = (uint32_t*)alloc_memory(4096);
+    for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
+    return page;
+}
+
+void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode) {
+    uint32_t index = (vaddr >> 12) & 0x3FF; // Extract the page table index
+    table[index] = (vaddr & ~0xFFF) | mode | PE_P; // Map the page with the provided mode
 }
 
 /* === Page tables === */
@@ -269,8 +280,14 @@ static uint32_t *kernel_pdir;
 
 static void setup_kernel_vmem(void)
 {
-    todo_use(kernel_pdir);
-    todo_abort();
+    kernel_pdir = allocate_page();
+    // Identity map the first 4 MB of memory for the kernel.
+    uint32_t *kernel_ptable = allocate_page(); // Allocate a page for the first page table
+    for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) { // 4 MB
+        identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
+    }
+    // Put the address of the page table into the first entry of the page directory
+    kernel_pdir[0] = (uint32_t)kernel_ptable | PE_P | PE_RW;
 }
 
 /*
@@ -278,8 +295,23 @@ static void setup_kernel_vmem(void)
  */
 void setup_process_vmem(pcb_t *p)
 {
-    todo_use(p);
-    todo_abort();
+    // Allocate a new page directory for the process
+    uint32_t *proc_pdir = allocate_page();
+
+    // Copy kernel mappings from kernel_pdir to proc_pdir
+    // It simply copies the first entry to share the first 4 MB where the kernel resides
+    proc_pdir[0] = kernel_pdir[0]; // Share the kernel space
+
+    // Allocate and setup page table for the process's specific memory (code and data segments)
+    uint32_t *proc_ptable = allocate_page();
+    proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second 4 MB of virtual space
+
+    // Map process pages
+    for (uint32_t addr = 0x400000; addr < 0x800000; addr += 0x1000) { // The next 4 MB after kernel space
+        identity_map_page(proc_ptable, addr, PE_P | PE_RW | PE_US);
+    }
+    // Update the process control block (pcb_t) to point to the new page directory
+    p->page_directory = proc_pdir;
 }
 
 /*
