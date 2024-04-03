@@ -6,16 +6,6 @@
  * same image without screwing up the running. It also means the
  * disk image is read once. And that we cannot use the program disk.
  */
-/*
- * This code currently has nothing to do with the process of paging to
- * disk. It only contains code to set up a page directory and page
- * table for a new process and for the kernel and kernel threads. The paging
- * mechanism is used for protection.
- *
- * Note:
- * This code assumes that the kernel can be mapped fully within the first
- * page table, and that any process only spans a single page table (4 MB).
- */
 
 #define pr_fmt(fmt) "vmem: " fmt
 
@@ -34,8 +24,11 @@
 
 #include "lib/assertk.h"
 #include "lib/printk.h"
+#include "lib/todo.h"
 #include "scheduler.h"
 #include "sync.h"
+#include "interrupt.h"
+#include "usb/scsi.h"
 
 #define UNUSED(x) ((void) x)
 
@@ -119,6 +112,7 @@ table_map_page(uint32_t *table, uint32_t vaddr, uint32_t paddr, uint32_t mode)
 {
     int index    = get_table_index(vaddr);
     table[index] = (paddr & PE_BASE_ADDR_MASK) | (mode & ~PE_BASE_ADDR_MASK);
+    invalidate_page((uint32_t *) vaddr);
 }
 
 /*
@@ -137,174 +131,105 @@ dir_ins_table(uint32_t *directory, uint32_t vaddr, void *table, uint32_t mode)
     directory[index] = (taddr & PE_BASE_ADDR_MASK) | access;
 }
 
+/* Set 12 least significant bytes in a page table entry to 'mode' */
+static inline void page_set_mode(uint32_t *pdir, uint32_t vaddr, uint32_t mode)
+{
+    uint32_t dir_index = get_directory_index((uint32_t) vaddr),
+             index     = get_table_index((uint32_t) vaddr), dir_entry, *table,
+             entry;
+
+    dir_entry = pdir[dir_index];
+    assertk(dir_entry & PE_P); /* dir entry present */
+
+    table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
+    /* clear table[index] bits 11..0 */
+    entry = table[index] & PE_BASE_ADDR_MASK;
+
+    /* set table[index] bits 11..0 */
+    entry |= mode & ~PE_BASE_ADDR_MASK;
+    table[index] = entry;
+
+    /* Flush TLB */
+    invalidate_page((uint32_t *) vaddr);
+}
+
+/* Debug-function.
+ * Write all memory addresses and values by with 4 byte increment to
+ * output-file. Output-file name is specified in bochsrc-file by line: com1:
+ * enabled=1, mode=file, dev=serial.out where 'dev=' is output-file.
+ * Output-file can be changed, but will by default be in 'serial.out'.
+ *
+ * Arguments
+ * title:              prefix for memory-dump
+ * start:              memory address
+ * end:                        memory address
+ * inclzero:   binary; skip address and values where values are zero
+ */
+ATTR_UNUSED
+static void
+dump_memory(char *title, uint32_t start, uint32_t end, uint32_t inclzero)
+{
+    uint32_t numpage, paddr;
+
+    pr_debug("%s\n", title);
+
+    numpage = 0;
+
+    for (paddr = start; paddr < end; paddr += sizeof(uint32_t)) {
+
+        /* Print header if address is page-aligned. */
+        if (paddr % PAGE_SIZE == 0) {
+            pr_debug("=== PAGE NUMBER %02d ===\n", numpage);
+            numpage++;
+        }
+        /* Avoid printing address entries with no value. */
+        if (!inclzero && *(uint32_t *) paddr == 0x0) {
+            continue;
+        }
+        /* Print:
+         * Entry-number from current page.
+         * Physical main memory address.
+         * Value at address.
+         */
+        pr_debug(
+                "%04d - Memory Loc: 0x%08x ~~~~~ Mem Val: 0x%08x\n",
+                ((paddr - start) / sizeof(uint32_t)) % PAGE_N_ENTRIES, paddr,
+                *(uint32_t *) paddr
+        );
+    }
+}
+
 /* === Page allocation tracking === */
 
 static lock_t page_map_lock = LOCK_INIT;
 
 /* === Page allocation === */
 
-/*
- * Returns a pointer to a freshly allocated page in physical
- * memory. The address is aligned on a page boundary.  The page is
- * zeroed out before the pointer is returned.
- */
-static uint32_t *allocate_page(void)
-{
-    uint32_t *page = (uint32_t *) alloc_memory(PAGE_SIZE);
-    int       i;
-
-    for (i = 0; i < 1024; page[i++] = 0)
-        ;
-
-    return page;
-}
-
 /* === Kernel and process setup === */
 
 /* address of the kernel page directory (shared by all kernel threads) */
 static uint32_t *kernel_pdir;
 
-/*
- * This sets up mapping for memory that should be shared between the
- * kernel and the user process. We need this since an interrupt or
- * exception doesn't change to another page directory, and we need to
- * have the kernel mapped in to handle the interrupts. So essentially
- * the kernel needs to be mapped into the user process address space.
- *
- * The user process can't access the kernel internals though, since
- * the processor checks the privilege level set on the pages and we
- * only set USER privileges on the pages the user process should be
- * allowed to access.
- *
- * Note:
- * - we identity map the pages, so that physical address is
- *   the same as the virtual address.
- *
- * - The user processes need access video memory directly, so we set
- *   the USER bit for the video page if we make this map in a user
- *   directory.
- */
-static void make_common_map(uint32_t *page_directory, int user)
-{
-    uint32_t *page_table, addr;
-
-    unsigned int kernel_mode = PE_P | PE_RW;
-    unsigned int user_mode   = PE_P | PE_RW | (user ? PE_US : 0);
-
-    /* Allocate memory for the page table  */
-    page_table = allocate_page();
-
-    /* Identity map the first 640KB of base memory */
-    for (addr = 0; addr < 640 * 1024; addr += PAGE_SIZE)
-        table_map_page(page_table, addr, addr, kernel_mode);
-
-    /* Identity map the video memory, from 0xb8000-0xb8fff. */
-    table_map_page(
-            page_table, (uint32_t) VGA_TEXT_PADDR, (uint32_t) VGA_TEXT_PADDR,
-            user_mode
-    );
-
-    /*
-     * Identity map in the rest of the physical memory so the
-     * kernel can access everything in memory directly.
-     */
-    for (addr = PAGING_AREA_MIN_PADDR; addr < PAGING_AREA_MAX_PADDR;
-         addr += PAGE_SIZE)
-        table_map_page(page_table, addr, addr, kernel_mode);
-
-    /*
-     * Insert in page_directory an entry for virtual address 0
-     * that points to physical address of page_table.
-     */
-    dir_ins_table(page_directory, 0, page_table, user_mode);
-}
-
-/*
- * Set up the page directory for the kernel and kernel threads.  Create kernel
- * page table, and identity map the first 0-640KB, Video RAM and
- * PAGING_AREA_MIN_PADDR-PAGING_AREA_MAX_PADDR, with kernel access privileges.
- */
 static void setup_kernel_vmem(void)
 {
-    /*
-     * Allocate memory for the page directory. A page directory
-     * is exactly the size of one page.
-     */
-    kernel_pdir = allocate_page();
-
-    /* This takes care of all the mapping that the kernel needs  */
-    make_common_map(kernel_pdir, 0);
+    todo_use(kernel_pdir);
+    todo_abort();
 }
 
 /*
- * Allocates and sets up the page directory and any necessary page
- * tables for a given process or thread.
- *
- * Note: We assume that the user code and data for the process fits
- * within a single page table (though not the same as the one the
- * kernel is mapped into). This works for project 4.
- *
+ * Sets up a page directory and page table for a new process or thread.
  */
 void setup_process_vmem(pcb_t *p)
 {
-    /*
-     * Two page tables are created,
-     * one for kernel memory (v.addr: 0..PAGING_AREA_MAX_PADDR)
-     * and one for process memory (v.addr: PROCESS_VADDR..).
-     *
-     * - 0..640KB, and PAGING_AREA_MIN_PADDR..PAGING_AREA_MAX_PADDR is identity
-     *   mapped with kernel access privileges. Video RAM is identity mapped
-     * with user aceess privileges.
-     *
-     * - PROCESS_VADDR..(PROCESS_VADDR + process size) is mapped into the
-     *   allocated base..(base + limit), with user privileges.
-     *
-     * - Finally p->page_directory points to the newly created page directory.
-     */
-
-    uint32_t *page_directory, *page_table, offset, paddr, vaddr;
-
-    lock_acquire(&page_map_lock);
-
-    if (p->is_thread) {
-        /*
-         * Threads use the kernels page directory, so just set
-         * a pointer to that one and return.
-         */
-        p->page_directory = kernel_pdir;
-        lock_release(&page_map_lock);
-        return;
-    }
-    /*
-     * User process. Allocate memory for page directory map in the
-     * address space we share with the kernel.
-     */
-    page_directory = allocate_page();
-    make_common_map(page_directory, 1);
-
-    unsigned int user_mode = PE_P | PE_RW | PE_US;
-
-    /* Now we need to set up for the user processes address space. */
-    page_table = allocate_page();
-    dir_ins_table(page_directory, PROCESS_VADDR, page_table, user_mode);
-
-    /*
-     * Map in the image that we loaded in from disk. limit is the
-     * size of the process image + stack in bytes
-     */
-    for (offset = 0; offset < p->limit; offset += PAGE_SIZE) {
-        paddr = p->base + offset;
-        vaddr = PROCESS_VADDR + offset;
-        table_map_page(page_table, vaddr, paddr, user_mode);
-    }
-    p->page_directory = page_directory;
-
-    lock_release(&page_map_lock);
+    todo_use(p);
+    todo_abort();
 }
 
 /*
- * Called by _start() Must be called before we can allocate memory,
- * and before we call any "paging" function.
+ * init_memory()
+ *
+ * called once by _start() in kernel.c
+ * You need to set up the virtual memory map for the kernel here.
  */
 void init_memory(void)
 {
@@ -312,3 +237,19 @@ void init_memory(void)
     setup_kernel_vmem();
 }
 
+/* === Exception handlers === */
+
+/*
+ * Handle page fault
+ */
+void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
+{
+    nointerrupt_leave();
+
+    todo_use(stack_frame);
+    todo_use(error_code);
+    todo_use(page_map_lock);
+    todo_abort();
+
+    nointerrupt_enter();
+}

@@ -192,17 +192,6 @@ BOOTBLOCK_OBJS += boot/bootblock.o
 boot/bootblock: $(BOOTBLOCK_OBJS)
 
 KERNEL_OBJS := $(call dirobjs,kernel/,*)
-
-### "given" precompiled object files
-#
-# Given files are compiled, completed object files that in-progress work
-# can be tested against. Uncomment these line in different combinations
-# to use different combinations of given and in-progress code.
-#KERNEL_OBJS := $(KERNEL_OBJS:kernel/mbox.o=kernel/mbox.given.o)
-#KERNEL_OBJS := $(KERNEL_OBJS:kernel/keyboard.o=kernel/keyboard.given.o)
-#KERNEL_OBJS := $(KERNEL_OBJS:kernel/sync.o=kernel/sync.given.o)
-#KERNEL_OBJS := $(KERNEL_OBJS:kernel/pcb.o=kernel/pcb.given.o)
-
 kernel/kernel: $(KERNEL_OBJS)
 kernel/kernel: -lutil#		Link against our util library
 kernel/kernel: CPPFLAGS += -D OSLIBC_CORE_ONLY

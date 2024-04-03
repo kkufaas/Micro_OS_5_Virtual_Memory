@@ -96,14 +96,14 @@ static void spinlock_release_nointerrupt(spinlock_t *s)
 
 static void spinlock_acquire_atomic(spinlock_t *s)
 {
-    todo_use(s);
-    todo_noop();
+    while (atomic_flag_test_and_set(&s->flag)) {
+        yield();
+    }
 }
 
 static void spinlock_release_atomic(spinlock_t *s)
 {
-    todo_use(s);
-    todo_noop();
+    atomic_flag_clear(&s->flag);
 }
 
 /* --- Spinlock API --- */
@@ -170,14 +170,22 @@ static void lock_release_nointerrupt(lock_t *l)
 
 static void lock_acquire_atomic(lock_t *l)
 {
-    todo_use(l);
-    todo_noop();
+    spinlock_acquire(&l->inner_lock);
+    while (l->locked) {
+        spinlock_release(&l->inner_lock);
+        block(&l->wait_queue);
+        spinlock_acquire(&l->inner_lock);
+    }
+    l->locked = true;
+    spinlock_release(&l->inner_lock);
 }
 
 static void lock_release_atomic(lock_t *l)
 {
-    todo_use(l);
-    todo_noop();
+    spinlock_acquire(&l->inner_lock);
+    l->locked = false;
+    if (l->wait_queue) unblock(&l->wait_queue);
+    spinlock_release(&l->inner_lock);
 }
 
 /* --- Lock API --- */
@@ -256,21 +264,27 @@ static void condition_broadcast_nointerrupt(condition_t *c)
 
 static void condition_wait_atomic(lock_t *m, condition_t *c)
 {
-    todo_use(m);
-    todo_use(c);
-    todo_noop();
+    lock_release(m);
+    block(&c->wait_queue);
+    lock_acquire(m);
 }
 
 static void condition_signal_atomic(condition_t *c)
 {
-    todo_use(c);
-    todo_noop();
+    spinlock_acquire(&c->inner_lock);
+    if (c->wait_queue != NULL) {
+        unblock(&c->wait_queue);
+    }
+    spinlock_release(&c->inner_lock);
 }
 
 static void condition_broadcast_atomic(condition_t *c)
 {
-    todo_use(c);
-    todo_noop();
+    spinlock_acquire(&c->inner_lock);
+    while (c->wait_queue != NULL) {
+        unblock(&c->wait_queue);
+    }
+    spinlock_release(&c->inner_lock);
 }
 
 /* --- Condvars API --- */
@@ -338,14 +352,24 @@ static void semaphore_down_nointerrupt(semaphore_t *s)
 
 static void semaphore_up_atomic(semaphore_t *s)
 {
-    todo_use(s);
-    todo_noop();
+    spinlock_acquire(&s->inner_lock);
+    s->value++;
+    if (s->value <= 0 && s->wait_queue) {
+        unblock(&s->wait_queue);
+    }
+    spinlock_release(&s->inner_lock);
 }
 
 static void semaphore_down_atomic(semaphore_t *s)
 {
-    todo_use(s);
-    todo_noop();
+    spinlock_acquire(&s->inner_lock);
+    s->value--;
+    if (s->value < 0) {
+        spinlock_release(&s->inner_lock);
+        block(&s->wait_queue);
+        spinlock_acquire(&s->inner_lock);
+    }
+    spinlock_release(&s->inner_lock);
 }
 
 /* --- Semaphore API --- */

@@ -69,10 +69,9 @@ struct pcb {
     /* For virtual memory / paging */
 
     uint32_t *page_directory; /* Virtual memory page directory */
-    /* The base physical address of the process this is just for project 4 */
-    uint32_t base;
-    /* Size of memory allocated for this process (code + data + user stack) */
-    uint32_t limit;
+    uint32_t swap_loc;         /* Swap space base address */
+    uint32_t swap_size;        /* Size of this process */
+    uint32_t page_fault_count; /* Number of page faults */
 
 };
 
@@ -96,7 +95,7 @@ extern pcb_t pcb[PCB_TABLE_SIZE];
 void init_pcb_table(void);
 
 int create_thread(uintptr_t start_addr);
-int create_process(uint32_t base, uint32_t size);
+int create_process(uint32_t location, uint32_t size);
 
 /* === Dynamic Process Loading === */
 

@@ -62,7 +62,7 @@ void clock_thread(void)
                 ANSI_EFWD); // Clear right, then return
 
         print_pcb_table();
-        print_mbox_status();    // Warning: May clash with other displays
+        print_mbox_status(); // Warning: May clash with other displays
         yield();
     }
 }

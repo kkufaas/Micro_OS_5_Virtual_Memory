@@ -46,7 +46,12 @@ void init_memory(void);
 /* Set up a page directory and page table for the process. */
 void setup_process_vmem(pcb_t *p);
 
-/* Allocate contiguous bytes of memory aligned to a page boundary */
-uintptr_t alloc_memory(size_t bytes);
+/*
+ * Page fault handler, called from interrupt.c: exception_14().
+ * Should handle demand paging
+ */
+void page_fault_handler(
+        struct interrupt_frame *stack_frame, ureg_t error_code
+);
 
 #endif /* MEMORY_H */

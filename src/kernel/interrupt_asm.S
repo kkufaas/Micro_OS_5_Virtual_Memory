@@ -96,3 +96,45 @@ pci11_entry:
 	IRQ_ENTRY_WRAPPER	11, pci_interrupt, pass_irqnum=1, \
 				nointerrupt_leave=1
 
+	/*
+	 * Low level entry point for page fault handler
+	 */
+	.globl  page_fault_handler_entry
+page_fault_handler_entry:
+	call	nointerrupt_enter
+
+	/* Create stack frame */
+	.equ	FR_IRET_FRAME,	+8	# Start of EIP,CS,EFLAGS frame
+	.equ	FR_ERRCODE,	+4
+	.equ	FR_ORIG_BP,	+0
+	push	%ebp
+	mov	%esp,	%ebp
+
+	SAVE_GEN_REGS
+	SAVE_FP_REGS
+	SAVE_DATA_SEGMENTS
+	LOAD_KERNEL_DATA_SEGMENTS,	scratch=%eax
+
+	mov	current_running,	%eax
+	incl	PCB_NESTED_COUNT(%eax)
+
+	/* Call handler in C. */
+	mov	FR_ERRCODE(%ebp),	%eax	# Arg 2: Error code
+	push	%eax
+	lea	FR_IRET_FRAME(%ebp),	%eax	# Arg 1: Frame addr
+	push	%eax
+	call	page_fault_handler
+	addl	$8, %esp			# Pop args
+
+	mov	current_running,	%eax
+	decl	PCB_NESTED_COUNT(%eax)
+
+	RESTORE_DATA_SEGMENTS
+	RESTORE_FP_REGS
+	RESTORE_GEN_REGS
+
+	pop	%ebp
+	call	nointerrupt_leave_delayed
+	add	$4,	%esp		# Pop error code
+	iret
+

@@ -271,27 +271,82 @@ static int mbox;
 
 void keyboard_init(void)
 {
-    todo_noop();
+    /* Open mailbox QUEUE */
+    mbox = mbox_open(QUEUE);
+    assertf(mbox >= 0, "mbox_open failed");
 }
 
 /*
  * Function to read a character from the keyboard queue.
  * Writes an ASCII character to *c.
+ *
+ * We need a critical section around getchar because this could happen:
+ * Process X has called getchar()
+ *
+ *  getchar() {
+ *    ...
+ *    mbox_recv() {
+ *      lock_acquire(&l);
+ *      ...                no context switch
+ *      IRQ 1 =================================> irq1() {
+ *        ...
+ *        putchar() {
+ *          ...
+ *          mbox_stat() {
+ *            lock_acquire(&l)
+ *              Process X is blocked while holding lock l.
  */
 int getchar(int *c)
 {
-    todo_use(c);
-    todo_noop();
+    char space[CHAR_MSG_SIZE];
+    msg_t *m = (msg_t *) space;
+
+    /* CS to avoid deadlocks */
+    nointerrupt_enter();
+    mbox_recv(mbox, m);
+    nointerrupt_leave();
+
+    assertf(m->size == 1, "Invalid message");
+    *c = m->body[0];
     return 1;
 }
 
 /*
  * Called by the keyboard interrupt (irq1) handler (through
  * normal_handler) to insert an ASCII character in the keyboard queue.
+ *
+ * We need a C_S because:
+ * 1. Process X has acquired the lock L when a keyboard interrupt occurs.
+ * 2. Process X is now running inside putchar(), mbox_stat() reports
+ *    that there is enough room for one more message.
+ * 3. Timer interrupt, process Y is scheduled to run.
+ * 4. Keyboard interrupt, process Y is now in putchar(), mbox_stat() reports
+ *    that there is enough room for one more mesage, so process Y sends message
+ * 5. Timer interrupt, process X is scheduled to run.
+ * 6. Mailbox is full, but process X sends a message and is blocked.
+ * 7. Process S (the consumer) is scheduled to run, but before it calls
+ *    getchar(), it acquires lock L, and is blocked (because Process X holds
+ *    lock L).
+ * ==> Deadlock
  */
 void putchar(struct character *c)
 {
-    todo_use(c);
-    todo_use(mbox);
-    todo_noop();
+    int count, available_space;
+    char space[CHAR_MSG_SIZE];
+    msg_t *m = (msg_t *) space;
+
+    m->size = 1;
+    m->body[0] = c->character;
+
+    /* CS to avoid deadlocks */
+    nointerrupt_enter();
+    /*
+     * producer can't block discard character if buffer is full
+     * (assume the user won't type too fast)
+     */
+    mbox_stat(mbox, &count, &available_space);
+    if (available_space >= CHAR_MSG_SIZE) {
+        mbox_send(mbox, m);
+    }
+    nointerrupt_leave();
 }

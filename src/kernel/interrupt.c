@@ -12,6 +12,7 @@
 #include "hardware/pit_8235.h"
 #include "lib/assertk.h"
 #include "lib/printk.h"
+#include "memory.h"
 #include "scheduler.h"
 #include "sync.h"
 #include "syscall.h"
@@ -98,7 +99,6 @@ DFLT_HDLR_EXCEPTION(IVEC_TS, handle_invalid_tss, "Invalid TSS Fault");
 DFLT_HDLR_EXCEPTION(IVEC_NP, handle_seg_not_present, "Segment Not Present");
 DFLT_HDLR_EXCEPTION(IVEC_SS, handle_stack_seg_fault, "Stack Segment fault");
 DFLT_HDLR_EXCEPTION(IVEC_GP, handle_gen_protect_fault, "General Protection fault");
-DFLT_HDLR_EXCEPTION(IVEC_PF, handle_page_fault, "Page fault");
 /* clang-format on */
 
 /*
@@ -158,6 +158,8 @@ void pci9_entry(void);
 void pci10_entry(void);
 void pci11_entry(void);
 
+void page_fault_handler_entry(void);
+
 /* === Initialization === */
 
 struct descriptor idt[IDT_SIZE];
@@ -193,7 +195,7 @@ void init_idt(void)
     install_interrupt_handler(IVEC_NP, handle_seg_not_present, PL0);
     install_interrupt_handler(IVEC_SS, handle_stack_seg_fault, PL0);
     install_interrupt_handler(IVEC_GP, handle_gen_protect_fault, PL0);
-    install_interrupt_handler(IVEC_PF, handle_page_fault, PL0);
+    install_interrupt_handler(IVEC_PF, page_fault_handler_entry, PL0);
 
     /* Add handlers for external Interrupt Requests (IRQs) */
     install_interrupt_handler(IVEC_IRQ_0 + IRQ_TIMER, timer_isr_entry, PL0);

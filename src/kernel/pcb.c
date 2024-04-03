@@ -194,20 +194,26 @@ void init_pcb_table(void)
 static pcb_t *alloc_pcb()
 {
     pcb_t *p;
+    nointerrupt_enter();
     assertf(freelist, "no free pcb structs");
     p = queue_shift(&freelist);
+    nointerrupt_leave();
     return p;
 }
 
 /* put the pcb back into the free list */
 void free_pcb(pcb_t *p)
 {
+    nointerrupt_enter();
     queue_insert(&freelist, p);
+    nointerrupt_leave();
 }
 
 static void create_pcb_common(struct pcb *p)
 {
+    nointerrupt_enter();
     p->pid = next_pid++;
+    nointerrupt_leave();
 
     /* allocate kernel stack */
     assertf(next_stack < T_KSTACK_AREA_MAX_PADDR, "Out of stack space");
@@ -220,6 +226,7 @@ static void create_pcb_common(struct pcb *p)
 
     p->preempt_count = 0;
     p->yield_count   = 0;
+    p->page_fault_count = 0;
 
     p->int_controller_mask = ~IRQS_TO_ENABLE;
 }
@@ -230,11 +237,14 @@ static void create_pcb_common(struct pcb *p)
  */
 int create_thread(uintptr_t start_addr)
 {
+    nointerrupt_enter();
 
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
 
     p->is_thread = true;
+
+    nointerrupt_leave();
 
     p->nested_count = 1;
 
@@ -246,8 +256,8 @@ int create_thread(uintptr_t start_addr)
     p->cs = KERNEL_CS;
     p->ds = KERNEL_DS;
 
-    p->base  = 0; /* only set for processes */
-    p->limit = 0; /* only set for processes */
+    p->swap_loc  = 0;
+    p->swap_size = 0;
     /* Sets p->page_directory = &(created page directory) */
     setup_process_vmem(p);
 
@@ -259,9 +269,8 @@ int create_thread(uintptr_t start_addr)
  * Allocate and set up the pcb for a new process, allocate resources
  * for it and insert it into the ready queue.
  */
-int create_process(uint32_t base, uint32_t size)
+int create_process(uint32_t location, uint32_t size)
 {
-    nointerrupt_enter();
 
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
@@ -271,8 +280,7 @@ int create_process(uint32_t base, uint32_t size)
     p->nested_count = 0;
 
     /* setup user stack */
-    p->user_stack =
-            PROCESS_VADDR + size - T_KSTACK_SIZE_EACH + T_KSTACK_START_OFFSET;
+    p->user_stack = PROCESS_STACK_VADDR;
 
     /* Each processes has its own address space */
     p->start_pc = PROCESS_VADDR;
@@ -281,13 +289,12 @@ int create_process(uint32_t base, uint32_t size)
     p->cs = PROCESS_CS | 3;
     p->ds = PROCESS_DS | 3;
 
-    p->base  = base;
-    p->limit = size;
+    p->swap_loc  = location;
+    p->swap_size = size;
     setup_process_vmem(p);
 
     queue_insert(&current_running, p);
 
-    nointerrupt_leave();
     return 0;
 }
 
@@ -310,9 +317,31 @@ int readdir(unsigned char *buf)
      * in kernel space because addresses are one-to-one with
      * physical-address.
      */
-    todo_use(buf);
-    todo_noop();
-    return -1;
+    char      internal_buf[SECTOR_SIZE];
+    int       rc;
+
+    uint16_t  os_size;         /* in sectors */
+    const int OS_SIZE_LOC = 2; /* Position within bootblock */
+
+    /* read the boot block */
+    pr_info("reading bootblock\n");
+    /* bootblock is in block 0 */
+    rc = scsi_read(0, 1, internal_buf);
+
+    if (rc < 0) return -1;
+
+    os_size = *((uint16_t *) (internal_buf + OS_SIZE_LOC));
+
+    /* now skip the kernel, and read the directory */
+    pr_info("reading process directory\n");
+    rc = scsi_read(os_size + 1, 1, internal_buf);
+
+    if (rc < 0) return -1;
+
+    /* we are done! */
+    bcopy(internal_buf, (char *) buf, SECTOR_SIZE);
+
+    return 0;
 }
 
 /*
@@ -322,10 +351,12 @@ int readdir(unsigned char *buf)
  */
 int loadproc(int location, int size)
 {
-    todo_use(location);
-    todo_use(size);
-    todo_noop();
-    return -1;
+    /*
+     * With swap enabled, we no longer have to pre-load the process binary
+     * from disk. We merely set up the mapping between memory and disk,
+     * and let the page-fault handler swap pages in on demand.
+     */
+    return create_process(location, size);
 }
 
 /* === Print Process Status Table === */
@@ -363,6 +394,7 @@ void print_pcb_table(void)
     static const int W_STATUS  = -3;
     static const int W_PREEMPT = 6;
     static const int W_YIELD   = 6;
+    static const int W_PGFLT   = 5;
     static const int W_KSTACK  = 5;
 
     tprintf(&procterm, "%*s", W_PID, "Pid");
@@ -370,6 +402,7 @@ void print_pcb_table(void)
     tprintf(&procterm, " %*s", W_STATUS, "St");
     if (W_PREEMPT) tprintf(&procterm, " %*s", W_PREEMPT, "Pmpt");
     if (W_YIELD) tprintf(&procterm, " %*s", W_YIELD, "Yld");
+    if (W_PGFLT) tprintf(&procterm, " %*s", W_PGFLT, "PgFlt");
     if (W_KSTACK) tprintf(&procterm, " %*s", W_KSTACK, "KStck");
     tprintf(&procterm, ANSIF_EL "\n", ANSI_EFWD); // Clear right, then newline
 
@@ -384,6 +417,7 @@ void print_pcb_table(void)
         tprintf(&procterm, " %*s", W_STATUS, status[p->status]);
         if (W_PREEMPT) tprintf(&procterm, " %*d", W_PREEMPT, p->preempt_count);
         if (W_YIELD) tprintf(&procterm, " %*d", W_YIELD, p->yield_count);
+        if (W_PGFLT) tprintf(&procterm, " %*d", W_PGFLT, p->page_fault_count);
         if (W_KSTACK) tprintf(&procterm, " %*x", W_KSTACK, p->kernel_stack);
         tprintf(&procterm, ANSIF_EL "\n",
                 ANSI_EFWD); // Clear right, then newline
