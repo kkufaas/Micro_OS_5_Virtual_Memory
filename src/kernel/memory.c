@@ -289,7 +289,7 @@ static void setup_kernel_vmem(void) {
     insertPinnedPage(kernel_ptable_vpn, true);
 
     // Mapping kernel memory with specific physical addresses
-    for (uint32_t addr = 0, paddr = SOME_KERNEL_PHYS_BASE; addr < KERNEL_SIZE; addr += PAGE_SIZE, paddr += PAGE_SIZE) {
+    for (uint32_t addr = 0, paddr = KERNEL_PADDR; addr < KERNEL_SIZE; addr += PAGE_SIZE, paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, addr, paddr, PE_P | PE_RW);
         // Optionally, mark each kernel page as pinned
     }
