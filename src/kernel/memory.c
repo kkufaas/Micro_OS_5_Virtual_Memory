@@ -144,6 +144,10 @@ uint32_t* allocate_page(void) {
 void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode) {
     uint32_t index = (vaddr >> 12) & 0x3FF; // Extract the page table index
     table[index] = (vaddr & ~0xFFF) | mode | PE_P; // Map the page with the provided mode
+
+    // suggestion:
+    // table_map_page(table, vaddr, vaddr, mode);
+    // other suggestion: just use the one-liner above and scrap this function
 }
 
 /* === Page tables === */
@@ -180,8 +184,7 @@ static inline void
 table_map_page(uint32_t *table, uint32_t vaddr, uint32_t paddr, uint32_t mode)
 {
     int index    = get_table_index(vaddr);
-    table[index] = (paddr & PE_BASE_ADDR_MASK) | (mode & ~PE_BASE_ADDR_MASK);
-    invalidate_page((uint32_t *) vaddr);
+    table[index] = (paddr & PE_BASE_ADDR_MASK) | (mode & ~PE_BASE_ADDR_MASK); invalidate_page((uint32_t *) vaddr);
 }
 
 /*
@@ -199,6 +202,7 @@ dir_ins_table(uint32_t *directory, uint32_t vaddr, void *table, uint32_t mode)
 
     directory[index] = (taddr & PE_BASE_ADDR_MASK) | access;
 }
+
 
 /* Set 12 least significant bytes in a page table entry to 'mode' */
 static inline void page_set_mode(uint32_t *pdir, uint32_t vaddr, uint32_t mode)
@@ -323,7 +327,9 @@ void setup_process_vmem(pcb_t *p) {
     insertPinnedPage(proc_ptable_vpn, true);
 
     // Map it into the second entry of the page directory
-    proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
+    // this should use dir_ins_table ?:
+    dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, PE_P | PE_RW | PE_US);
+    // proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
 
     // Map process pages (specific memory)
     for (uint32_t paddr = KERNEL_SIZE; paddr < 0x800000; paddr += PAGE_SIZE) { // The next 4 MB after kernel space
@@ -342,19 +348,19 @@ void setup_process_vmem(pcb_t *p) {
         // Insert the newly allocated page table into the page directory
         dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
         uint32_t stack_ptable_vpn = ((uintptr_t)stack_ptable) >> 12;
+        table_map_page(proc_pdir, PROCESS_STACK_VADDR, stack_page, PE_P | PE_RW | PE_US);
         insertPinnedPage(stack_ptable_vpn, true);
     }
 
     // Calculate the table index for the stack's virtual address
-    uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
+    // uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
 
     // Get the page table for the stack's address range
     // FIXME: I we don't need to make another table?
     // map the PROCESS_STACK_VADDR constant to the allocated stac_page, and insert it to the table
-    uint32_t* stack_ptable = (uint32_t*)(proc_pdir[dir_index] & PE_BASE_ADDR_MASK);
-
     // Map the stack page to the virtual address within the page table
-    stack_ptable[table_index] = ((uintptr_t)stack_page & PE_BASE_ADDR_MASK) | PE_P | PE_RW | PE_US;
+
+    //stack_ptable[table_index] = ((uintptr_t)stack_page & PE_BASE_ADDR_MASK) | PE_P | PE_RW | PE_US);
 
     // Mark the stack page as pinned
     insertPinnedPage(PROCESS_STACK_VADDR >> 12, true); // Convert address to VPN and mark as pinned
