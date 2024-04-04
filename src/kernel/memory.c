@@ -32,6 +32,7 @@
 
 #define UNUSED(x) ((void) x)
 #define HASH_TABLE_SIZE 1024
+#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 
 /* === Simple memory allocation === */
 
@@ -290,7 +291,7 @@ static void setup_kernel_vmem(void) {
     insertPinnedPage(kernel_ptable_vpn, true);
 
     // Identity map the first 4 MB of memory for the kernel.
-    for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) {
+    for (uint32_t addr = 0; addr < KERNEL_SIZE; addr += 0x1000) {
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
         // Perhaps mark each kernel page as pinned here too
     }
@@ -322,8 +323,8 @@ void setup_process_vmem(pcb_t *p) {
     proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
 
     // Map process pages (specific memory)
-    for (uint32_t addr = 0x400000; addr < 0x800000; addr += PAGE_SIZE) { // The next 4 MB after kernel space
-        identity_map_page(proc_ptable, addr, PE_P | PE_RW | PE_US); // Maps virtual address addr to itself with the specified mode
+    for (uint32_t paddr = KERNEL_SIZE; paddr < 0x800000; paddr += PAGE_SIZE) { // The next 4 MB after kernel space
+        identity_map_page(proc_ptable, paddr, PE_P | PE_RW | PE_US); // Maps virtual address addr to itself with the specified mode
         // Perhaps mark specific process pages as pinned?
     }
 
