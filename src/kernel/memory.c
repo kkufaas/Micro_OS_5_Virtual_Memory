@@ -295,8 +295,8 @@ static void setup_kernel_vmem(void) {
     insertPinnedPage(kernel_ptable_vpn, true);
 
     // Identity map the first 4 MB of memory for the kernel.
-    for (uint32_t addr = 0; addr < KERNEL_SIZE; addr += 0x1000) {
-        identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
+    for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += 0x1000) {
+        identity_map_page(kernel_ptable, paddr, PE_P | PE_RW);
         // Perhaps mark each kernel page as pinned here too
     }
     // Put the address of the page table into the first entry of the page directory
