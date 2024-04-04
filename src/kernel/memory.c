@@ -287,58 +287,57 @@ static void setup_kernel_vmem(void)
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
     }
     // Put the address of the page table into the first entry of the page directory
-
-
-    // FIXME: NOTE: suggest we use provided helper functions to avoid uneccessary bugs
     dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
-    //kernel_pdir[0] = (uint32_t) kernel_ptable | PE_P | PE_RW;
 }
 
 /*
  * Sets up a page directory and page table for a new process or thread.
  */
-void setup_process_vmem(pcb_t *p)
-{
+void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
     uint32_t *proc_pdir = allocate_page();
 
-    // Copy kernel mappings from kernel_pdir to proc_pdir
-    // It simply copies the first entry to share the first 4 MB where the kernel resides
-    // TODO: this needs some more explanation
-
-    // FIXME: NOTE: suggest we use provided helper functions to avoid uneccessary bugs
-    proc_pdir[0] = kernel_pdir[0]; // Share the kernel space
-
-    uint32_t kernel_size = PAGE_SIZE; // FIXME: get correct kernel size
-    assertk(kernel_size < PROCESS_VADDR);
-    for (uintptr_t current_vaddr = 0; (int) current_vaddr < kernel_size; current_vaddr += PAGE_SIZE) {
-        // maps virtual address current_vaddr to the kernel
-        dir_ins_table(proc_pdir, current_vaddr, kernel_pdir[0], kernel_pdir[0] & MODE_MASK);
-    }
+    // Ensure the kernel's virtual address space is consistently mapped into the virtual address space of every process.
+    // The kernel needs to be accessible at all times to handle system calls, interrupts, and exceptions.
+    proc_pdir[0] = kernel_pdir[0];
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
-    proc_pdir[1] = (uint32_t) proc_ptable | PE_P | PE_RW | PE_US;
+    proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
 
-    // Map process pages
-    for (uint32_t addr = 0x400000; addr < 0x800000; addr += 0x1000) { // The next 4 MB after kernel space
-        identity_map_page(proc_ptable, addr, PE_P | PE_RW | PE_US);
+    // Map process pages (specific memory)
+    for (uint32_t addr = 0x400000; addr < 0x800000; addr += PAGE_SIZE) { // The next 4 MB after kernel space
+        identity_map_page(proc_ptable, addr, PE_P | PE_RW | PE_US); // Maps virtual address addr to itself with the specified mode
     }
-    // Update the process control block (pcb_t) to point to the new page directory
+
+    // Allocate stack area - assuming a fixed size stack area
+    uint32_t* stack_page = allocate_page();
+
+    // Calculate the directory index for the stack's virtual address
+    uint32_t dir_index = get_directory_index(PROCESS_STACK_VADDR);
+    if (!(proc_pdir[dir_index] & PE_P)) {
+        // No page table exists, allocate a new one
+        uint32_t* stack_ptable = allocate_page();
+        // Insert the newly allocated page table into the page directory
+        dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
+    }
+
+    // Calculate the table index for the stack's virtual address
+    uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
+
+    // Get the page table for the stack's address range
+    uint32_t* stack_ptable = (uint32_t*)(proc_pdir[dir_index] & PE_BASE_ADDR_MASK);
+
+    // Map the stack page to the virtual address within the page table
+    stack_ptable[table_index] = ((uintptr_t)stack_page & PE_BASE_ADDR_MASK) | PE_P | PE_RW | PE_US;
+
+    // Ensure the stack pointer for the process is set appropriately
+    p->user_stack = PROCESS_STACK_VADDR;
+
+    // Update the process control block to point to the new page directory
     p->page_directory = proc_pdir;
-
-
-    // allocate stack area - fixed size stack areas assumed
-
-    uintptr_t stack_page = allocate_page();
-
-    // TODO: map the virtual memory to the stack area
-    // p -> user_stack?  by default p -> user_stack = PROCESS_STACK_VADDR = 0xeffffff0
-
-
-
-
 }
+
 
 /*
  * init_memory()
