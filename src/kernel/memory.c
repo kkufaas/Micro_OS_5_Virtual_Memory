@@ -285,6 +285,8 @@ static void setup_kernel_vmem(void)
     uint32_t *kernel_ptable = allocate_page(); // Allocate a page for the first page table
     for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) { // 4 MB
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
+        // Convert the address to a virtual page number (VPN) and mark it as pinned
+        insertPinnedPage(addr >> 12, true);
     }
     // Put the address of the page table into the first entry of the page directory
     dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
@@ -308,6 +310,7 @@ void setup_process_vmem(pcb_t *p) {
     // Map process pages (specific memory)
     for (uint32_t addr = 0x400000; addr < 0x800000; addr += PAGE_SIZE) { // The next 4 MB after kernel space
         identity_map_page(proc_ptable, addr, PE_P | PE_RW | PE_US); // Maps virtual address addr to itself with the specified mode
+        // Perhaps mark specific process pages as pinned?
     }
 
     // Allocate stack area - assuming a fixed size stack area
@@ -330,6 +333,9 @@ void setup_process_vmem(pcb_t *p) {
 
     // Map the stack page to the virtual address within the page table
     stack_ptable[table_index] = ((uintptr_t)stack_page & PE_BASE_ADDR_MASK) | PE_P | PE_RW | PE_US;
+
+    // Mark the stack page as pinned
+    insertPinnedPage(PROCESS_STACK_VADDR >> 12, true); // Convert address to VPN and mark as pinned
 
     // Ensure the stack pointer for the process is set appropriately
     p->user_stack = PROCESS_STACK_VADDR;
