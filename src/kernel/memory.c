@@ -32,7 +32,15 @@
 
 #define UNUSED(x) ((void) x)
 #define HASH_TABLE_SIZE 1024
-#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
+//#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
+#define KERNEL_SIZE 0x300000 // 4 MB in hexadecimal
+
+
+#define MEMDEBUG 1
+#define DEBUG_PAGEFAULT 1
+#define MEM_DEBUG_LOADPROC 1
+
+#define STACK_SIZE 0x1000 // two pages - same as kernel level stacks
 
 /* === Simple memory allocation === */
 
@@ -280,21 +288,50 @@ static lock_t page_map_lock = LOCK_INIT;
 static uint32_t *kernel_pdir;
 
 
-static void setup_kernel_vmem(void) {
-    kernel_pdir = allocate_page();
+static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
+    uint32_t user_mode = PE_P | PE_RW | PE_US;
+    uint32_t kernel_mode = PE_P | PE_RW;
     uint32_t *kernel_ptable = allocate_page();
 
     // Mark the kernel's page table as pinned
-    uint32_t kernel_ptable_vpn = ((uintptr_t)kernel_ptable) >> 12;
-    insertPinnedPage(kernel_ptable_vpn, true);
+    uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
+    insertPinnedPage(kernel_ptable_number, true);
+
+    /* Identity map the video memory, from 0xb8000-0xb8fff.
+     * From P4-precode
+     * */
+    int mode = (is_user ? user_mode : kernel_mode);
+    table_map_page(
+            kernel_ptable, (uint32_t) VGA_TEXT_PADDR, (uint32_t) VGA_TEXT_PADDR, mode
+    );
 
     // Mapping kernel memory with specific physical addresses
-    for (uint32_t addr = 0, paddr = KERNEL_PADDR; addr < KERNEL_SIZE; addr += PAGE_SIZE, paddr += PAGE_SIZE) {
-        table_map_page(kernel_ptable, addr, paddr, PE_P | PE_RW);
-        // Optionally, mark each kernel page as pinned
+    for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
+        table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
     }
 
-    dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
+    /*
+     * Identity map in the rest of the physical memory so the
+     * kernel can access everything in memory directly.
+     * From P4-precode
+     */
+    for (uint32_t paddr = PAGING_AREA_MIN_PADDR; paddr < PAGING_AREA_MAX_PADDR; paddr += PAGE_SIZE) {
+        table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
+    }
+
+    dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
+}
+
+
+static void setup_kernel_vmem(void) {
+    lock_acquire(&page_map_lock);
+    kernel_pdir = allocate_page();
+    setup_kernel_vmem_common(kernel_pdir, 0);
+    lock_release(&page_map_lock);
+}
+
+
+static void load_disk_segment(location, size) {
 }
 
 
@@ -304,58 +341,101 @@ static void setup_kernel_vmem(void) {
 void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
     uint32_t *proc_pdir = allocate_page();
+    uint32_t user_mode = PE_RW | PE_US;
 
-    // Ensure the kernel's virtual address space is consistently mapped into 
-    // the virtual address space of every process. The kernel needs to be accessible
-    // at all times to handle interrupts since the CPU only sees virtual addresses.
-    // It is important that flags make the addresses not accessible by the user
-    // proc_pdir[0] = kernel_pdir[0];
-    uint32_t *pageTableAddress = (uint32_t *)(kernel_pdir[0] & PE_BASE_ADDR_MASK);
-    dir_ins_table(proc_pdir, 0, pageTableAddress, kernel_pdir[0] & MODE_MASK);
-    //dir_ins_table(proc_pdir, 0, kernel_pdir[0], kernel_pdir[0] & MODE_MASK);
+    // basically same as P4-precode
+    lock_acquire(&page_map_lock);
+    if (p->is_thread) {
+        p -> page_directory = kernel_pdir;
+        pr_debug("setup thread vmem done\n");
+        lock_release(&page_map_lock);
+        return;
+    } else {
+        // Ensure the kernel's virtual address space is consistently mapped into 
+        // the virtual address space of every process. The kernel needs to be accessible
+        // at all times to handle interrupts since the CPU only sees virtual addresses.
+        // It is important that flags make the addresses not accessible by the user
+        setup_kernel_vmem_common(proc_pdir, 1);
+    }
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
 
-    // Calculate the VPN for the page table
-    uint32_t proc_ptable_vpn = ((uintptr_t)proc_ptable) >> 12; // PAGE_SIZE is 4096
-
-    // Mark the process-specific page table as pinned
-    insertPinnedPage(proc_ptable_vpn, true);
+    // Calculate the (physical) page number of the page table and page dirs and pin them
+    uint32_t proc_ptable_number = ((uintptr_t)proc_ptable) >> PAGE_TABLE_BITS; 
+    uint32_t proc_pdir_number = ((uintptr_t)proc_pdir) >> PAGE_TABLE_BITS; 
+    insertPinnedPage(proc_ptable_number, true);
+    insertPinnedPage(proc_pdir_number, true);
 
     // Map it into the second entry of the page directory
-    proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
+    // set as present since it is a page table.
+    dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode | PE_P);
 
+    //proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; 
+
+    /// ------------------------------------------------------------------------
+    // this section makes no sense because the same physical non-kernel memory
+    // is mapped to itself, even with no allocated pages
+    //
     // Map process pages (specific memory)
-    for (uint32_t paddr = KERNEL_SIZE; paddr < 0x800000; paddr += PAGE_SIZE) { // The next 4 MB after kernel space
-        identity_map_page(proc_ptable, paddr, PE_P | PE_RW | PE_US); // Maps virtual address addr to itself with the specified mode
-        // Perhaps mark specific process pages as pinned?
+    // The next 4 MB after kernel space
+    //   for (uint32_t paddr = KERNEL_SIZE; paddr < 0x800000; paddr += PAGE_SIZE) { 
+    //       // Maps virtual address addr to itself with the specified mode
+    //       identity_map_page(proc_ptable, paddr, PE_P | user_mode); 
+    //       // Perhaps mark specific process pages as pinned?
+    //   }
+    /// ------------------------------------------------------------------------
+
+
+    /*
+     * Map in the process image.
+     * Modified from P4-precode
+     * 
+     * NOTE: either swap_size is text + data only (excludes the stack), or the
+     * stack size must be subtracted from p->swap_size in the loop conditional
+     */
+    uint32_t paddr, vaddr, offset;
+    for (offset = 0; offset < p->swap_size; offset += PAGE_SIZE) {
+        paddr = p->swap_loc + offset;
+        vaddr = PROCESS_VADDR + offset;
+        table_map_page(proc_ptable, vaddr, paddr, user_mode);
     }
 
-    // Allocate stack area - assuming a fixed size stack area
-    uint32_t* stack_page = allocate_page();
+    // Allocate pages of stack area
+    // assuming a fixed size stack area for each process
+    uint32_t *stack_page, stack_vaddr;
+    uint32_t stack_lim = PROCESS_STACK_VADDR - STACK_SIZE;
+    uint32_t stack_base = PROCESS_STACK_VADDR;
+    for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
+        stack_page = allocate_page();
+        // should another table be used?
+        // map the stack virtual address to the proc_ptable
+        table_map_page(proc_ptable, stack_vaddr,  (uint32_t) stack_page, user_mode | PE_P);
+    }
 
     // Calculate the directory index for the stack's virtual address
-    uint32_t dir_index = get_directory_index(PROCESS_STACK_VADDR);
-    uint32_t* stack_ptable;
+    // uint32_t stack_dir_index = get_directory_index(PROCESS_STACK_VADDR);
+    // uint32_t* stack_ptable;
     
-    if (!(proc_pdir[dir_index] & PE_P)) {
-        // No page table exists, allocate a new one
-        stack_ptable = allocate_page();
-        // Insert the newly allocated page table into the page directory
-        dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
-        uint32_t stack_ptable_vpn = ((uintptr_t)stack_ptable) >> 12;
-        insertPinnedPage(stack_ptable_vpn, true);
-    } else {
-        stack_ptable = (uint32_t*)(proc_pdir[dir_index] & PE_BASE_ADDR_MASK);
-    }
+    // if (!(proc_pdir[stack_dir_index] & PE_P)) {
+    //     // No page table exists, allocate a new one
+    //     stack_ptable = allocate_page();
+    //     // Insert the newly allocated page table into the page directory
+    //     dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
+    //     uint32_t stack_ptable_vpn = ((uintptr_t)stack_ptable) >> 12;
+    //     insertPinnedPage(stack_ptable_vpn, true);
+    // } else {
+    //     stack_ptable = (uint32_t*)(proc_pdir[stack_dir_index] & PE_BASE_ADDR_MASK);
+    // }
 
-    // Here we use table_map_page to map the stack page.
-    table_map_page(stack_ptable, PROCESS_STACK_VADDR, (uint32_t)stack_page, PE_P | PE_RW);
-    insertPinnedPage(PROCESS_STACK_VADDR >> 12, true);
+    // // Here we use table_map_page to map the stack page.
+    // table_map_page(stack_ptable, PROCESS_STACK_VADDR, (uint32_t)stack_page, PE_P | PE_RW);
+    // insertPinnedPage(PROCESS_STACK_VADDR >> 12, true);
 
     // Update the process control block
     p->page_directory = proc_pdir;
+    pr_debug("setup process vmem done\n");
+    lock_release(&page_map_lock);
 }
 
 
@@ -374,11 +454,64 @@ void init_memory(void)
 /* === Exception handlers === */
 
 /*
+ * Comment author: Eindride Kjersheim
+ * Error code bits, from Intel i386 manual page 170.
+ * https://css.csail.mit.edu/6.858/2014/readings/i386.pdf
+ * 
+ *                                 2       1       0
+ *  ____________________________ ______________________
+ * |            29 bits         |  U/S    W/R     V/P  | 
+ * |___________undefined________|______________________|
+ * 
+ *  Error code is the last 3 bits masked as error_code & 0x7, recall 0x7 = 0b111
+ *  
+ * U/S bit: 1 when processor was executing in user mode, 0 when in supervisor mode
+ * W/R bit: 1 for write, 0 for read
+ * P/V bit: 1 for page-level protection violation, 0 for page not present
+ */ 
+
+
+#define ec_privilige_level(error_code) (error_code) & 0x4 >> 2
+#define ec_write(error_code) (error_code) & 0x2 >> 1
+#define ec_page_not_present(error_code) !((error_code) & 0x1)
+#define ec_privilige_violation(error_code) (error_code) & 0x1
+
+/*
  * Handle page fault
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
     nointerrupt_leave();
+    if (MEMDEBUG) {
+        print_pcb_table();
+        pr_debug("error code: %u \n", error_code & 0x7);
+    }
+
+    
+    // bool error_code_privilige = (error_code & 0x4) >> 2;
+    // bool error_code_write = (error_code & 0x2) >> 1;
+    // bool error_code_page_not_present = (~error_code) & 0x1;
+    // bool error_code_privilige_violation = !error_code_page_not_present;
+
+    if (ec_privilige_violation(error_code)) {
+        // abort - access violation
+        pr_error("page fault: access violation");
+        abortk();
+    } else {
+        // page not present
+
+        if (DEBUG_PAGEFAULT) {
+            pr_debug("page fault: page not present \n");
+            pr_debug("page fault: privlige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
+            pr_debug("page fault: read/write operation (W=1, R=0) %u\n", ec_write(error_code));
+        }
+
+        // different handling of read/writes?
+
+        // what to do with privilige levels - simply info for what mode to set on pages?
+    }
+
+
 
     todo_use(stack_frame);
     todo_use(error_code);
