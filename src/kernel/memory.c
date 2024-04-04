@@ -348,6 +348,8 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
 
     // Get the page table for the stack's address range
+    // FIXME: I we don't need to make another table?
+    // map the PROCESS_STACK_VADDR constant to the allocated stac_page, and insert it to the table
     uint32_t* stack_ptable = (uint32_t*)(proc_pdir[dir_index] & PE_BASE_ADDR_MASK);
 
     // Map the stack page to the virtual address within the page table
