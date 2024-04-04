@@ -352,14 +352,9 @@ void setup_process_vmem(pcb_t *p) {
         insertPinnedPage(stack_ptable_vpn, true);
     }
 
-    // Calculate the table index for the stack's virtual address
-    // uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
 
-    // Get the page table for the stack's address range
-    // FIXME: I we don't need to make another table?
-    // map the PROCESS_STACK_VADDR constant to the allocated stac_page, and insert it to the table
     // Map the stack page to the virtual address within the page table
-
+    // uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
     //stack_ptable[table_index] = ((uintptr_t)stack_page & PE_BASE_ADDR_MASK) | PE_P | PE_RW | PE_US);
 
     // Mark the stack page as pinned
