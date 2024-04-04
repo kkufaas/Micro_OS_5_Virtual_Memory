@@ -278,15 +278,21 @@ static lock_t page_map_lock = LOCK_INIT;
 /* address of the kernel page directory (shared by all kernel threads) */
 static uint32_t *kernel_pdir;
 
-static void setup_kernel_vmem(void)
-{
+
+static void setup_kernel_vmem(void) {
     kernel_pdir = allocate_page();
+
+    // Allocate a page for the first page table
+    uint32_t *kernel_ptable = allocate_page();
+    // Calculate the VPN for the page table
+    uint32_t kernel_ptable_vpn = ((uintptr_t)kernel_ptable) >> 12; // PAGE_SIZE is 4096 (1 << 12)
+    // Mark the kernel's page table as pinned
+    insertPinnedPage(kernel_ptable_vpn, true);
+
     // Identity map the first 4 MB of memory for the kernel.
-    uint32_t *kernel_ptable = allocate_page(); // Allocate a page for the first page table
-    for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) { // 4 MB
+    for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) {
         identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
-        // Convert the address to a virtual page number (VPN) and mark it as pinned
-        insertPinnedPage(addr >> 12, true);
+        // Perhaps mark each kernel page as pinned here too
     }
     // Put the address of the page table into the first entry of the page directory
     dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
@@ -305,6 +311,14 @@ void setup_process_vmem(pcb_t *p) {
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
+
+    // Calculate the VPN for the page table
+    uint32_t proc_ptable_vpn = ((uintptr_t)proc_ptable) >> 12; // PAGE_SIZE is 4096
+
+    // Mark the process-specific page table as pinned
+    insertPinnedPage(proc_ptable_vpn, true);
+
+    // Map it into the second entry of the page directory
     proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; // Map it into the second entry of the page directory
 
     // Map process pages (specific memory)
@@ -323,6 +337,8 @@ void setup_process_vmem(pcb_t *p) {
         uint32_t* stack_ptable = allocate_page();
         // Insert the newly allocated page table into the page directory
         dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
+        uint32_t stack_ptable_vpn = ((uintptr_t)stack_ptable) >> 12;
+        insertPinnedPage(stack_ptable_vpn, true);
     }
 
     // Calculate the table index for the stack's virtual address
