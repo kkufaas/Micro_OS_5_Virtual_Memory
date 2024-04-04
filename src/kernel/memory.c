@@ -290,9 +290,9 @@ static void setup_kernel_vmem(void) {
     insertPinnedPage(kernel_ptable_vpn, true);
 
     // Identity map the first 4 MB of memory for the kernel.
-    for (uint32_t addr = 0; addr < 0x400000; addr += 0x1000) {
-        identity_map_page(kernel_ptable, addr, PE_P | PE_RW);
-        // Perhaps mark each kernel page as pinned here too
+    uint32_t *kernel_ptable = allocate_page(); // Allocate a page for the first page table
+    for (uint32_t vaddr = 0; vaddr < 0x400000; vaddr += 0x1000) { // 4 MB
+        identity_map_page(kernel_ptable, vaddr, PE_P | PE_RW);
     }
     // Put the address of the page table into the first entry of the page directory
     dir_ins_table(kernel_pdir, 0, kernel_ptable, PE_P | PE_RW);
@@ -305,9 +305,12 @@ void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
     uint32_t *proc_pdir = allocate_page();
 
-    // Ensure the kernel's virtual address space is consistently mapped into the virtual address space of every process.
-    // The kernel needs to be accessible at all times to handle system calls, interrupts, and exceptions.
-    proc_pdir[0] = kernel_pdir[0];
+    // Ensure the kernel's virtual address space is consistently mapped into 
+    // the virtual address space of every process. The kernel needs to be accessible
+    // at all times to handle interrupts since the CPU only sees virtual addresses.
+    // It is important that flags make the addresses not accessible by the user
+    // proc_pdir[0] = kernel_pdir[0];
+    dir_ins_table(proc_pdir, 0, kernel_pdir[0], kernel_pdir[0] & MODE_MASK);
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
@@ -354,7 +357,9 @@ void setup_process_vmem(pcb_t *p) {
     insertPinnedPage(PROCESS_STACK_VADDR >> 12, true); // Convert address to VPN and mark as pinned
 
     // Ensure the stack pointer for the process is set appropriately
-    p->user_stack = PROCESS_STACK_VADDR;
+
+    // FIXME: this is done in pcb.c
+    // p->user_stack = PROCESS_STACK_VADDR;
 
     // Update the process control block to point to the new page directory
     p->page_directory = proc_pdir;
