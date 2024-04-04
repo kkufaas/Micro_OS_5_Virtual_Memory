@@ -306,9 +306,12 @@ void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
     uint32_t *proc_pdir = allocate_page();
 
-    // Ensure the kernel's virtual address space is consistently mapped into the virtual address space of every process.
-    // The kernel needs to be accessible at all times to handle system calls, interrupts, and exceptions.
-    proc_pdir[0] = kernel_pdir[0];
+    // Ensure the kernel's virtual address space is consistently mapped into 
+    // the virtual address space of every process. The kernel needs to be accessible
+    // at all times to handle interrupts since the CPU only sees virtual addresses.
+    // It is important that flags make the addresses not accessible by the user
+    // proc_pdir[0] = kernel_pdir[0];
+    dir_ins_table(proc_pdir, 0, kernel_pdir[0], kernel_pdir[0] & MODE_MASK);
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
@@ -346,6 +349,8 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t table_index = get_table_index(PROCESS_STACK_VADDR);
 
     // Get the page table for the stack's address range
+    // FIXME: I we don't need to make another table?
+    // map the PROCESS_STACK_VADDR constant to the allocated stac_page, and insert it to the table
     uint32_t* stack_ptable = (uint32_t*)(proc_pdir[dir_index] & PE_BASE_ADDR_MASK);
 
     // Map the stack page to the virtual address within the page table
@@ -355,7 +360,9 @@ void setup_process_vmem(pcb_t *p) {
     insertPinnedPage(PROCESS_STACK_VADDR >> 12, true); // Convert address to VPN and mark as pinned
 
     // Ensure the stack pointer for the process is set appropriately
-    p->user_stack = PROCESS_STACK_VADDR;
+
+    // FIXME: this is done in pcb.c
+    // p->user_stack = PROCESS_STACK_VADDR;
 
     // Update the process control block to point to the new page directory
     p->page_directory = proc_pdir;
