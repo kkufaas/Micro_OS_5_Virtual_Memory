@@ -10,6 +10,10 @@
 #include "hardware/cpu_x86.h"
 #include "pcb.h"
 
+#define BITS_PER_ENTRY (sizeof(uint32_t) * 8) // 32 bits for uint32_t
+#define BITMAP_SIZE    ((PAGEABLE_PAGES + BITS_PER_ENTRY - 1) / BITS_PER_ENTRY)
+
+
 enum {
     /* physical page facts */
     PAGE_N_ENTRIES   = (PAGE_SIZE / sizeof(uint32_t)),

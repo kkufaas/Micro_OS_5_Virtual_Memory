@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <ansi_term/ansi_esc.h>
 #include <ansi_term/termbuf.h>
@@ -34,6 +35,8 @@
 #define HASH_TABLE_SIZE 1024
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 #define KERNEL_SIZE 0x300000 // 4 MB in hexadecimal
+uint32_t free_pages_bitmap[BITMAP_SIZE];
+static unsigned long next = 1;
 
 
 #define MEMDEBUG 1
@@ -87,7 +90,16 @@ void free_memory(uint32_t ptr)
     spinlock_release(&next_free_mem_lock);
 }
 
-/* == Pinned page tracking == */
+// void *memset(void *s, int c, size_t n)
+// {
+//     for (unsigned char *cur = s; n > 0; n--, cur++) *cur = (unsigned char) c;
+//     return s;
+// }
+
+/*
+ * === Pinned Page Tracking ===
+ * Functions for managing pinned pages, which should not be swapped out.
+ */
 
 typedef struct PinnedPageEntry {
     uint32_t vpn; // Virtual Page Number
@@ -116,14 +128,12 @@ PinnedPageEntry* allocateEntry() {
 bool isPagePinned(uint32_t vpn) {
     unsigned int index = hashFunction(vpn);
     PinnedPageEntry* entry = hashTable[index];
-
     while (entry) {
         if (entry->vpn == vpn) {
             return entry->pinned;
         }
         entry = entry->next;
     }
-
     return false;
 }
 
@@ -132,7 +142,6 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
     if (newEntry == NULL) {
         return;
     }
-
     newEntry->vpn = vpn;
     newEntry->pinned = pinned;
     unsigned int index = hashFunction(vpn);
@@ -143,15 +152,12 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
 
 }
 
-uint32_t* allocate_page(void) {
-    uint32_t* page = (uint32_t*) alloc_memory(4096);
-    for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
-    return page;
-}
 
-void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode) {
-    uint32_t index = (vaddr >> 12) & 0x3FF; // Extract the page table index
-    table[index] = (vaddr & ~0xFFF) | mode | PE_P; // Map the page with the provided mode
+/* === Initializes the bitmap to mark all pages as free === */
+void initialize_free_pages_bitmap() {
+    // Using custom memset function from string_core.c file
+    // Multiply by sizeof(uint32_t) because the bitmap is an array of uint32_t, not bytes
+    memset(free_pages_bitmap, 0xFF, sizeof(free_pages_bitmap[0]) * BITMAP_SIZE);
 }
 
 /* === Page tables === */
@@ -280,7 +286,26 @@ dump_memory(char *title, uint32_t start, uint32_t end, uint32_t inclzero)
 
 static lock_t page_map_lock = LOCK_INIT;
 
-/* === Page allocation === */
+/*
+ * === Page Allocation and Management ===
+ * Functions to allocate physical pages, map virtual addresses to physical pages, and convert page numbers to virtual addresses.
+ */
+
+uint32_t* allocate_page(void) {
+    uint32_t* page = (uint32_t*) alloc_memory(4096);
+    for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
+    return page;
+}
+
+void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode) {
+    uint32_t index = (vaddr >> 12) & 0x3FF; // Extract the page table index
+    table[index] = (vaddr & ~0xFFF) | mode | PE_P; // Map the page with the provided mode
+}
+
+uint32_t page_number_to_virtual_address(uint32_t page_number) {
+    return page_number * PAGE_SIZE;
+}
+
 
 /* === Kernel and process setup === */
 
@@ -318,7 +343,6 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     for (uint32_t paddr = PAGING_AREA_MIN_PADDR; paddr < PAGING_AREA_MAX_PADDR; paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
     }
-
     dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
 }
 
@@ -331,8 +355,8 @@ static void setup_kernel_vmem(void) {
 }
 
 
-static void load_disk_segment(location, size) {
-}
+// static void load_disk_segment(location, size) {
+// }
 
 
 /*
@@ -412,8 +436,12 @@ void setup_process_vmem(pcb_t *p) {
  */
 void init_memory(void)
 {
+    // Initialize the bitmap to track free pages
+    initialize_free_pages_bitmap();
+
     next_free_mem = PAGING_AREA_MIN_PADDR;
     setup_kernel_vmem();
+
 }
 
 /* === Exception handlers === */
@@ -440,6 +468,111 @@ void init_memory(void)
 #define ec_write(error_code) (error_code) & 0x2 >> 1
 #define ec_page_not_present(error_code) !((error_code) & 0x1)
 #define ec_privilige_violation(error_code) (error_code) & 0x1
+
+/* === Page Fault Handler Helper Functions === */
+
+/*
+ * === Random Number Generation for Page Eviction ===
+ * These functions are involved in generating random numbers for the random page eviction strategy.
+ * They implement a simple pseudo-random number generator.
+ */
+
+
+// Generates a pseudo-random number using a linear congruential generator.
+unsigned long generate_random_number() {
+    next = next * 1103515245 + 12345;
+    return (unsigned long)(next/65536) % 32768;
+}
+
+// Seed the generator. In a real system, we might use a more unpredictable seed.
+// void srand(unsigned long seed) {
+//     next = seed;
+// }
+
+/*
+ * === Page Eviction and State Management ===
+ * Functions to handle the eviction of pages, check if pages are dirty or free, and mark pages as used/free.
+ */
+ 
+// Random eviction algorithm
+uint32_t select_page_for_eviction() {
+    uint32_t random_page_number = generate_random_number() % PAGEABLE_PAGES;
+    return random_page_number;
+}
+
+// Checks if the given page is dirty by looking up its page table entry
+bool is_page_dirty(uint32_t vaddr) {
+    uint32_t dir_index = get_directory_index(vaddr);
+    uint32_t dir_entry = kernel_pdir[dir_index];
+    if (!(dir_entry & PE_P)) {
+        // Page directory entry is not present.
+        return false;
+    }
+    uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
+    uint32_t table_index = get_table_index(vaddr);
+    uint32_t page_entry = page_table[table_index];
+    return (page_entry & PE_D) != 0;
+}
+
+// bool is_page_dirty_user(uint32_t vaddr, uint32_t* page_directory) {
+//     // We might need this version of the function that would take an additional parameter for the page directory,
+//     // allowing it to be used with any process's address space, not just the kernel's...
+// }
+
+// Checks if a page is free by consulting the free pages bitmap.
+bool is_page_free(uint32_t page_number) {
+    if (page_number >= PAGEABLE_PAGES) {
+        return false; // Out of bounds
+    }
+    uint32_t index = page_number / BITS_PER_ENTRY;
+    uint32_t bit = page_number % BITS_PER_ENTRY;
+    return (free_pages_bitmap[index] & (1 << bit)) != 0;
+}
+
+void unmap_physical_page(uint32_t vaddr) {
+    page_set_mode(kernel_pdir, vaddr, 0); // Given mode 0 clears the PE_P bit
+}
+
+void mark_page_as_free(uint32_t page_number) {
+    if (page_number < PAGEABLE_PAGES) {
+        uint32_t index = page_number / BITS_PER_ENTRY;
+        uint32_t bit = page_number % BITS_PER_ENTRY;
+        free_pages_bitmap[index] |= (1 << bit);
+    }
+}
+
+void mark_page_as_used(uint32_t page_number) {
+    if (page_number < PAGEABLE_PAGES) {
+        uint32_t index = page_number / BITS_PER_ENTRY;
+        uint32_t bit = page_number % BITS_PER_ENTRY;
+        free_pages_bitmap[index] &= ~(1 << bit);
+    }
+}
+
+// Attempts to find and evict a page
+// Returns the physical address of the page that was evicted, or NULL if no suitable page was found.
+uint32_t* try_evict_page() {
+    for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
+        uint32_t page_number = select_page_for_eviction();
+        if (!isPagePinned(page_number)) {
+            uint32_t vaddr = page_number_to_virtual_address(page_number); // Convert page number to virtual address.
+            if (is_page_dirty(page_number)) {
+                pr_debug("Write the page back to disk if it's dirty\n");
+                // Write the page back to disk if it's dirty
+                //TODO! update_page_table(page_number);
+            }
+            // Unmap the page from the address space, marking it as not present
+            unmap_physical_page(page_number);
+            // Mark the page as free for future use
+            mark_page_as_free(page_number);
+            // Optionally, return the virtual or physical address of the evicted page
+            return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted
+        }
+    }
+    // Couldn't find a suitable page to evict.
+    return NULL;
+}
+
 
 /*
  * Handle page fault
@@ -493,11 +626,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     // Step 2: Log or print the fault details for debugging
     log_page_fault(faulting_address, error_code) -- check presence/need to implement
-    // bool error_code_privilige = (error_code & 0x4) >> 2;
-    // bool error_code_write = (error_code & 0x2) >> 1;
-    // bool error_code_page_not_present = (~error_code) & 0x1;
-    // bool error_code_privilige_violation = !error_code_page_not_present;
-
 
     // Step 3: Decode the error code to understand the nature of the fault
     if error_code indicates protection violation:
