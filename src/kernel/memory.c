@@ -646,12 +646,12 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         // Step 5: Determine if the page needs to be loaded from disk or just allocated
         if page_needs_to_be_loaded_from_disk(faulting_address): -- check presence/need to implement
 
-            // Step 6: Check if there's a free page available
+            // DONE Step 6: Check if there's a free page available
             if not is_free_page_available(): -- check presence/need to implement
 
                 // Step 7: Evict a page if no free pages are available
-                evicted_page = select_page_for_eviction() -- need to implement
-                evict_page(evicted_page) -- need to implement
+                DONE evicted_page = select_page_for_eviction() -- need to implement
+                TO FINISH! evict_page(evicted_page) -- need to implement
             
             // Step 8: Load the page into a free page frame
             load_page_from_disk(faulting_address) -- check presence/need to implement
@@ -660,7 +660,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             allocate_new_page(faulting_address) -- check presence/need to implement
         
         // Step 9: Update the page table to reflect the changes
-        update_page_table(faulting_address) -- check presence/need to implement
+        TODO update_page_table(faulting_address) -- check presence/need to implement
         return
 
 
@@ -679,13 +679,13 @@ function valid_address_for_process(faulting_address):
 function page_needs_to_be_loaded_from_disk(faulting_address):
     // Determine if the faulting address corresponds to data that needs to be loaded from disk
 
-function is_free_page_available():
+DONE function is_free_page_available():
     // Check if there is a free page available in physical memory
 
-function select_page_for_eviction():
+DONE function select_page_for_eviction():
     // Select a page to evict based on the eviction policy (e.g., LRU, random?)
 
-function evict_page(page):
+TO FINISH!function evict_page(page):
     // Evict the specified page, writing it back to disk if necessary
 
 function load_page_from_disk(faulting_address):
@@ -694,7 +694,7 @@ function load_page_from_disk(faulting_address):
 function allocate_new_page(faulting_address):
     // Allocate a new page in physical memory for the faulting address
 
-function update_page_table(faulting_address):
+TODO! function update_page_table(faulting_address):
     // Update the page table entry for the faulting address to reflect the new page frame
 */
 }
