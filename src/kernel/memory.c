@@ -371,22 +371,6 @@ void setup_process_vmem(pcb_t *p) {
     // set as present since it is a page table.
     dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode | PE_P);
 
-    //proc_pdir[1] = (uint32_t)proc_ptable | PE_P | PE_RW | PE_US; 
-
-    /// ------------------------------------------------------------------------
-    // this section makes no sense because the same physical non-kernel memory
-    // is mapped to itself, even with no allocated pages
-    //
-    // Map process pages (specific memory)
-    // The next 4 MB after kernel space
-    //   for (uint32_t paddr = KERNEL_SIZE; paddr < 0x800000; paddr += PAGE_SIZE) { 
-    //       // Maps virtual address addr to itself with the specified mode
-    //       identity_map_page(proc_ptable, paddr, PE_P | user_mode); 
-    //       // Perhaps mark specific process pages as pinned?
-    //   }
-    /// ------------------------------------------------------------------------
-
-
     /*
      * Map in the process image.
      * Modified from P4-precode
@@ -412,25 +396,6 @@ void setup_process_vmem(pcb_t *p) {
         // map the stack virtual address to the proc_ptable
         table_map_page(proc_ptable, stack_vaddr,  (uint32_t) stack_page, user_mode | PE_P);
     }
-
-    // Calculate the directory index for the stack's virtual address
-    // uint32_t stack_dir_index = get_directory_index(PROCESS_STACK_VADDR);
-    // uint32_t* stack_ptable;
-    
-    // if (!(proc_pdir[stack_dir_index] & PE_P)) {
-    //     // No page table exists, allocate a new one
-    //     stack_ptable = allocate_page();
-    //     // Insert the newly allocated page table into the page directory
-    //     dir_ins_table(proc_pdir, PROCESS_STACK_VADDR, stack_ptable, PE_P | PE_RW | PE_US);
-    //     uint32_t stack_ptable_vpn = ((uintptr_t)stack_ptable) >> 12;
-    //     insertPinnedPage(stack_ptable_vpn, true);
-    // } else {
-    //     stack_ptable = (uint32_t*)(proc_pdir[stack_dir_index] & PE_BASE_ADDR_MASK);
-    // }
-
-    // // Here we use table_map_page to map the stack page.
-    // table_map_page(stack_ptable, PROCESS_STACK_VADDR, (uint32_t)stack_page, PE_P | PE_RW);
-    // insertPinnedPage(PROCESS_STACK_VADDR >> 12, true);
 
     // Update the process control block
     p->page_directory = proc_pdir;
@@ -519,4 +484,89 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
     todo_abort();
 
     nointerrupt_enter();
+
+/*
+    page_fault_handler, pseudocode:
+    ===============================
+    // Step 1: Retrieve the faulting address from CR2 register
+    faulting_address = call load_page_fault_addr() -- precode, cpu_x86.h
+
+    // Step 2: Log or print the fault details for debugging
+    log_page_fault(faulting_address, error_code) -- check presence/need to implement
+    // bool error_code_privilige = (error_code & 0x4) >> 2;
+    // bool error_code_write = (error_code & 0x2) >> 1;
+    // bool error_code_page_not_present = (~error_code) & 0x1;
+    // bool error_code_privilige_violation = !error_code_page_not_present;
+
+
+    // Step 3: Decode the error code to understand the nature of the fault
+    if error_code indicates protection violation:
+        // This is an access violation, not just a page not being present.
+        // It could mean an illegal access by a program, such as writing to a read-only page,
+        // accessing kernel memory from user mode, etc.
+        handle_protection_violation(faulting_address, error_code) -- check presence/need to implement
+        return
+
+    if error_code indicates the page is not present:
+        // The page the program wants to access is not in memory.
+        
+        // Step 4: Check if the address is within a valid range for the current process
+        if not valid_address_for_process(faulting_address): -- check presence/need to implement
+            handle_invalid_access(faulting_address) -- check presence/need to implement
+            return
+        
+        // Step 5: Determine if the page needs to be loaded from disk or just allocated
+        if page_needs_to_be_loaded_from_disk(faulting_address): -- check presence/need to implement
+
+            // Step 6: Check if there's a free page available
+            if not is_free_page_available(): -- check presence/need to implement
+
+                // Step 7: Evict a page if no free pages are available
+                evicted_page = select_page_for_eviction() -- need to implement
+                evict_page(evicted_page) -- need to implement
+            
+            // Step 8: Load the page into a free page frame
+            load_page_from_disk(faulting_address) -- check presence/need to implement
+        else:
+            // The page is not present because it hasn't been allocated yet (e.g., stack growth)
+            allocate_new_page(faulting_address) -- check presence/need to implement
+        
+        // Step 9: Update the page table to reflect the changes
+        update_page_table(faulting_address) -- check presence/need to implement
+        return
+
+
+Function to find in precode or implement:
+=========================================
+
+function log_page_fault(faulting_address, error_code):
+    // Log the faulting address and error code details for debugging purposes
+
+function handle_protection_violation(faulting_address, error_code):
+    // Handle protection violations, such as illegal accesses
+
+function valid_address_for_process(faulting_address):
+    // Check if the faulting address is within the valid address space of the current process
+
+function page_needs_to_be_loaded_from_disk(faulting_address):
+    // Determine if the faulting address corresponds to data that needs to be loaded from disk
+
+function is_free_page_available():
+    // Check if there is a free page available in physical memory
+
+function select_page_for_eviction():
+    // Select a page to evict based on the eviction policy (e.g., LRU, random?)
+
+function evict_page(page):
+    // Evict the specified page, writing it back to disk if necessary
+
+function load_page_from_disk(faulting_address):
+    // Load the required data from disk into the corresponding physical page
+
+function allocate_new_page(faulting_address):
+    // Allocate a new page in physical memory for the faulting address
+
+function update_page_table(faulting_address):
+    // Update the page table entry for the faulting address to reflect the new page frame
+*/
 }
