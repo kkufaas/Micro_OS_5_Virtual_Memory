@@ -34,9 +34,9 @@
 #define UNUSED(x) ((void) x)
 #define HASH_TABLE_SIZE 1024
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
-#define KERNEL_SIZE 0x300000 // 4 MB in hexadecimal
-uint32_t free_pages_bitmap[BITMAP_SIZE];
-static unsigned long next = 1;
+#define KERNEL_SIZE 0x300000 // 3 MB in hexadecimal
+uint32_t free_pages_bitmap[BITMAP_SIZE]; // A bitmap for tracking free pages, being initialized in init_memory
+static unsigned long next = 1; // Used in random function
 
 
 #define MEMDEBUG 1
@@ -89,12 +89,6 @@ void free_memory(uint32_t ptr)
 
     spinlock_release(&next_free_mem_lock);
 }
-
-// void *memset(void *s, int c, size_t n)
-// {
-//     for (unsigned char *cur = s; n > 0; n--, cur++) *cur = (unsigned char) c;
-//     return s;
-// }
 
 /*
  * === Pinned Page Tracking ===
@@ -155,7 +149,7 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
 
 /* === Initializes the bitmap to mark all pages as free === */
 void initialize_free_pages_bitmap() {
-    // Using custom memset function from string_core.c file
+    // Using custom memset from string.h file
     // Multiply by sizeof(uint32_t) because the bitmap is an array of uint32_t, not bytes
     memset(free_pages_bitmap, 0xFF, sizeof(free_pages_bitmap[0]) * BITMAP_SIZE);
 }
@@ -287,19 +281,13 @@ dump_memory(char *title, uint32_t start, uint32_t end, uint32_t inclzero)
 static lock_t page_map_lock = LOCK_INIT;
 
 /*
- * === Page Allocation and Management ===
- * Functions to allocate physical pages, map virtual addresses to physical pages, and convert page numbers to virtual addresses.
+ * === Page allocation ===
  */
 
 uint32_t* allocate_page(void) {
     uint32_t* page = (uint32_t*) alloc_memory(4096);
     for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
     return page;
-}
-
-void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode) {
-    uint32_t index = (vaddr >> 12) & 0x3FF; // Extract the page table index
-    table[index] = (vaddr & ~0xFFF) | mode | PE_P; // Map the page with the provided mode
 }
 
 uint32_t page_number_to_virtual_address(uint32_t page_number) {
@@ -314,37 +302,39 @@ static uint32_t *kernel_pdir;
 
 
 static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
-    uint32_t user_mode = PE_P | PE_RW | PE_US;
-    uint32_t kernel_mode = PE_P | PE_RW;
+    uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
+    uint32_t kernel_mode = PE_P | PE_RW; // Define access mode for kernel pages.
     uint32_t *kernel_ptable = allocate_page();
 
-    // Mark the kernel's page table as pinned
+    // Allocate and "pin" the page table to ensure it's not swapped out.
     uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
     insertPinnedPage(kernel_ptable_number, true);
 
-    /* Identity map the video memory, from 0xb8000-0xb8fff.
-     * From P4-precode
-     * */
+    /* Set the appropriate access flag (user or kernel) for the video buffer page at 0xb8000.
+     * Identity maps the video memory from 0xb8000-0xb8fff for direct access.
+     */
     int mode = (is_user ? user_mode : kernel_mode);
     table_map_page(
             kernel_ptable, (uint32_t) VGA_TEXT_PADDR, (uint32_t) VGA_TEXT_PADDR, mode
     );
 
-    // Mapping kernel memory with specific physical addresses
+    // Map the kernel memory using identity mapping for direct physical to virtual address mapping.
     for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
     }
 
     /*
-     * Identity map in the rest of the physical memory so the
-     * kernel can access everything in memory directly.
-     * From P4-precode
+     * Identity map the rest of the physical memory so the kernel can directly access
+     * all physical memory.
      */
     for (uint32_t paddr = PAGING_AREA_MIN_PADDR; paddr < PAGING_AREA_MAX_PADDR; paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
     }
+
+    // Insert the kernel page table into the page directory at the first entry, setting up the mapping for kernel space.
     dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
 }
+
 
 
 static void setup_kernel_vmem(void) {
@@ -358,9 +348,7 @@ static void setup_kernel_vmem(void) {
 // static void load_disk_segment(location, size) {
 // }
 
-
-/*
- * Sets up a page directory and page table for a new process or thread.
+ /* Sets up a page directory and page table for a new process or thread.
  */
 void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
@@ -427,7 +415,6 @@ void setup_process_vmem(pcb_t *p) {
     lock_release(&page_map_lock);
 }
 
-
 /*
  * init_memory()
  *
@@ -471,23 +458,11 @@ void init_memory(void)
 
 /* === Page Fault Handler Helper Functions === */
 
-/*
- * === Random Number Generation for Page Eviction ===
- * These functions are involved in generating random numbers for the random page eviction strategy.
- * They implement a simple pseudo-random number generator.
- */
-
-
 // Generates a pseudo-random number using a linear congruential generator.
 unsigned long generate_random_number() {
     next = next * 1103515245 + 12345;
     return (unsigned long)(next/65536) % 32768;
 }
-
-// Seed the generator. In a real system, we might use a more unpredictable seed.
-// void srand(unsigned long seed) {
-//     next = seed;
-// }
 
 /*
  * === Page Eviction and State Management ===
@@ -519,16 +494,6 @@ bool is_page_dirty(uint32_t vaddr) {
 //     // allowing it to be used with any process's address space, not just the kernel's...
 // }
 
-// Checks if a page is free by consulting the free pages bitmap.
-bool is_page_free(uint32_t page_number) {
-    if (page_number >= PAGEABLE_PAGES) {
-        return false; // Out of bounds
-    }
-    uint32_t index = page_number / BITS_PER_ENTRY;
-    uint32_t bit = page_number % BITS_PER_ENTRY;
-    return (free_pages_bitmap[index] & (1 << bit)) != 0;
-}
-
 void unmap_physical_page(uint32_t vaddr) {
     page_set_mode(kernel_pdir, vaddr, 0); // Given mode 0 clears the PE_P bit
 }
@@ -541,21 +506,13 @@ void mark_page_as_free(uint32_t page_number) {
     }
 }
 
-void mark_page_as_used(uint32_t page_number) {
-    if (page_number < PAGEABLE_PAGES) {
-        uint32_t index = page_number / BITS_PER_ENTRY;
-        uint32_t bit = page_number % BITS_PER_ENTRY;
-        free_pages_bitmap[index] &= ~(1 << bit);
-    }
-}
-
 // Attempts to find and evict a page
 // Returns the physical address of the page that was evicted, or NULL if no suitable page was found.
 uint32_t* try_evict_page() {
     for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
         uint32_t page_number = select_page_for_eviction();
         if (!isPagePinned(page_number)) {
-            uint32_t vaddr = page_number_to_virtual_address(page_number); // Convert page number to virtual address.
+            uint32_t vaddr = page_number_to_virtual_address(page_number);
             if (is_page_dirty(page_number)) {
                 pr_debug("Write the page back to disk if it's dirty\n");
                 // Write the page back to disk if it's dirty
@@ -573,7 +530,6 @@ uint32_t* try_evict_page() {
     return NULL;
 }
 
-
 /*
  * Handle page fault
  */
@@ -584,8 +540,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         print_pcb_table();
         pr_debug("error code: %u \n", error_code & 0x7);
     }
-
-    
     // bool error_code_privilige = (error_code & 0x4) >> 2;
     // bool error_code_write = (error_code & 0x2) >> 1;
     // bool error_code_page_not_present = (~error_code) & 0x1;
@@ -608,8 +562,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         // what to do with privilige levels - simply info for what mode to set on pages?
     }
-
-
 
     todo_use(stack_frame);
     todo_use(error_code);
@@ -646,12 +598,12 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         // Step 5: Determine if the page needs to be loaded from disk or just allocated
         if page_needs_to_be_loaded_from_disk(faulting_address): -- check presence/need to implement
 
-            // DONE Step 6: Check if there's a free page available
+            // Step 6: Check if there's a free page available
             if not is_free_page_available(): -- check presence/need to implement
 
                 // Step 7: Evict a page if no free pages are available
-                DONE evicted_page = select_page_for_eviction() -- need to implement
-                TO FINISH! evict_page(evicted_page) -- need to implement
+                DONE evicted_page = select_page_for_eviction()
+                TO FINISH! try_to_evict_page(evicted_page)
             
             // Step 8: Load the page into a free page frame
             load_page_from_disk(faulting_address) -- check presence/need to implement
@@ -660,7 +612,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             allocate_new_page(faulting_address) -- check presence/need to implement
         
         // Step 9: Update the page table to reflect the changes
-        TODO update_page_table(faulting_address) -- check presence/need to implement
+        update_page_table(faulting_address) -- check presence/need to implement
         return
 
 
@@ -679,13 +631,13 @@ function valid_address_for_process(faulting_address):
 function page_needs_to_be_loaded_from_disk(faulting_address):
     // Determine if the faulting address corresponds to data that needs to be loaded from disk
 
-DONE function is_free_page_available():
+function is_free_page_available():
     // Check if there is a free page available in physical memory
 
 DONE function select_page_for_eviction():
     // Select a page to evict based on the eviction policy (e.g., LRU, random?)
 
-TO FINISH!function evict_page(page):
+TO FINISH!function try_to_evict_page(page):
     // Evict the specified page, writing it back to disk if necessary
 
 function load_page_from_disk(faulting_address):
@@ -694,7 +646,7 @@ function load_page_from_disk(faulting_address):
 function allocate_new_page(faulting_address):
     // Allocate a new page in physical memory for the faulting address
 
-TODO! function update_page_table(faulting_address):
+function update_page_table(faulting_address):
     // Update the page table entry for the faulting address to reflect the new page frame
 */
 }
