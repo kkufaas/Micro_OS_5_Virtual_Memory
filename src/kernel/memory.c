@@ -530,35 +530,71 @@ uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) {
     uint32_t dir_index = get_directory_index(vaddr);
     uint32_t dir_entry = page_directory[dir_index];
     if (!(dir_entry & PE_P)) {
+        pr_debug("get_page_table: no page table found in page dir %p with virtual address %u\n", page_directory, vaddr);
         return NULL;
     }
     uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
     return page_table;
 }
 
-uint32_t vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
+uint32_t *vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
 {
     /*
      * perform a lookup in page directory
      * to extract physical address
      */
-    uint32_t index = get_table_index(vaddr);
-    uint32_t *page_table = get_page_table(vaddr, page_directory);
-    uint32_t *page = page_table[index];
-    return page + (vaddr & PAGE_MASK);
+    uint32_t *page_table, *page, index;
+    index = get_table_index(vaddr);
+    if(! (page_table = get_page_table(vaddr, page_directory)) ) {
+        goto error_notable;
+    }
+    page = &page_table[index];
+
+    if (*page & PE_P)
+        return page + (vaddr & PAGE_MASK);
+    else 
+        goto error_page_not_present;
+
+    error_notable:
+        pr_error("no page table in page_directory %p with suiting virtual address %u", page_directory, vaddr);
+        return NULL;
+    
+    error_page_not_present:
+        pr_error("no page in page table %p in page directory %p suiting virtual address %u", page_table, page_directory, vaddr);
+        return NULL;
 }
 
-uint32_t vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
+uint32_t *vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
 {
-    uint32_t *page_table = get_page_table(vaddr, page_directory);
-    return page_table[get_table_index(vaddr)];
+    /*
+     * Locates the (physical) page frame of the cirtual address
+     * with respect to the provided page_directory
+     */
+    uint32_t *page_table;
+    if( (page_table = get_page_table(vaddr, page_directory)) )
+        return &page_table[get_table_index(vaddr)];
+    else
+        return NULL;
 }
 
-uint32_t paddr_to_frameref(uint32_t paddr) {
+uint32_t *paddr_to_frameref(uint32_t paddr)
+{
+    /*
+     * Locates the (physical) page frame related to
+     * a physical address,
+     * Useful for checking page frame flags when evicting etc.
+     */
+
+
+    uint32_t *frameref = (uint32_t *) (paddr / PAGE_SIZE);
+    if (*frameref & PE_P) return frameref;
+    else return NULL;
+
+    // alternative: 
     // memory in kernel is identity mapped, so we can treat
     // the physical addres paddr as a virtual address inside
     // the kernel
-    return vaddr_to_pageref(paddr, kernel_pdir);
+    //return vaddr_to_frameref(paddr, kernel_pdir);
 }
 
 
