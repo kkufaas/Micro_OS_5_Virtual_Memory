@@ -100,7 +100,7 @@ typedef struct PinnedPageEntry {
     struct PinnedPageEntry* next; // For handling collisions via chaining
 } PinnedPageEntry;
 
-PinnedPageEntry* hashTable[HASH_TABLE_SIZE];
+PinnedPageEntry* pinnedHashTable[HASH_TABLE_SIZE];
 PinnedPageEntry* entryBlock = NULL; // Pointer to a block of entries
 size_t entriesAllocated = 0;        // Number of entries allocated from the block
 size_t entriesPerBlock = 4096 / sizeof(PinnedPageEntry); 
@@ -120,7 +120,7 @@ PinnedPageEntry* allocateEntry() {
 
 bool isPagePinned(uint32_t vpn) {
     unsigned int index = hashFunction(vpn);
-    PinnedPageEntry* entry = hashTable[index];
+    PinnedPageEntry* entry = pinnedHashTable[index];
     while (entry) {
         if (entry->vpn == vpn) {
             return entry->pinned;
@@ -140,10 +140,13 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
     unsigned int index = hashFunction(vpn);
 
     // Collision resolution by chaining
-    newEntry->next = hashTable[index];
-    hashTable[index] = newEntry;
-
+    newEntry->next = pinnedHashTable[index];
+    pinnedHashTable[index] = newEntry;
 }
+
+
+
+
 
 
 /* === Initializes the bitmap to mark all pages as free === */
@@ -292,8 +295,10 @@ uint32_t* allocate_page(void) {
 }
 
 uint32_t page_number_to_virtual_address(uint32_t page_number) {
+
     return page_number * PAGE_SIZE;
 }
+
 
 
 /* === Kernel and process setup === */
@@ -417,6 +422,32 @@ void setup_process_vmem(pcb_t *p) {
     lock_release(&page_map_lock);
 }
 
+uint32_t vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
+{
+    /*
+     * perform a lookup in page directory
+     * to extract physical address
+     */
+    uint32_t index = get_table_index(vaddr);
+    uint32_t *page_table = get_page_table(vaddr, page_directory);
+    uint32_t *page = page_table[index];
+    return page + (vaddr & PAGE_MASK);
+}
+
+uint32_t vaddr_to_pageref(uint32_t vaddr, uint32_t *page_directory)
+{
+    uint32_t *page_table = get_page_table(vaddr, page_directory);
+    return page_table[get_table_index(vaddr)];
+}
+
+uint32_t paddr_to_pageref(uint32_t paddr) {
+    // memory in kernel is identity mapped, so we can treat
+    // the physical addres paddr as a virtual address inside
+    // the kernel
+    return vaddr_to_pageref(paddr, kernel_pdir);
+}
+
+
 /*
  * init_memory()
  *
@@ -502,7 +533,9 @@ bool is_page_dirty(uint32_t vaddr) {
 void unmap_physical_page(uint32_t vaddr) {
     // Eindride 8/04-22: 
     // Changed kernel_pdir to current_running->page_directory
-    page_set_mode(current_running->page_directory, vaddr, 0); // Given mode 0 clears the PE_P bit
+
+    // Given mode 0 clears the PE_P bit
+    page_set_mode(current_running->page_directory, vaddr, 0); 
 }
 
 void mark_page_as_free(uint32_t page_number) {
@@ -512,6 +545,7 @@ void mark_page_as_free(uint32_t page_number) {
         free_pages_bitmap[index] |= (1 << bit);
     }
 }
+
 /*
  * Given a virtual address and a pointer to the page directory, it
  * returns a pointer to the relevant page table.
