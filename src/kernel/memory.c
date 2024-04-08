@@ -587,15 +587,15 @@ uint32_t *paddr_to_frameref(uint32_t paddr)
 
     // integer division: (paddr / PAGE_SIZE) * PAGE_SIZE == PAGE_SIZE
     // is true only when paddr is a multiple of PAGE_SIZE
-    uint32_t *frameref = (uint32_t *) ((paddr / PAGE_SIZE)*PAGE_SIZE);
-    if (*frameref & PE_P) return frameref;
-    else return NULL;
+    // uint32_t *frameref = (uint32_t *) ((paddr / PAGE_SIZE)*PAGE_SIZE);
+    // if (*frameref & PE_P) return frameref;
+    // else return NULL;
 
-    // alternative: 
-    // memory in kernel is identity mapped, so we can treat
-    // the physical addres paddr as a virtual address inside
-    // the kernel
-    //return vaddr_to_frameref(paddr, kernel_pdir);
+    //  
+    //  memory in kernel is identity mapped, so we can treat
+    //  the physical addres paddr as a virtual address inside
+    //  the kernel
+    return vaddr_to_frameref(paddr, kernel_pdir);
 }
 
 
