@@ -585,8 +585,9 @@ uint32_t *paddr_to_frameref(uint32_t paddr)
      * Useful for checking page frame flags when evicting etc.
      */
 
-
-    uint32_t *frameref = (uint32_t *) (paddr / PAGE_SIZE);
+    // integer division: (paddr / PAGE_SIZE) * PAGE_SIZE == PAGE_SIZE
+    // is true only when paddr is a multiple of PAGE_SIZE
+    uint32_t *frameref = (uint32_t *) ((paddr / PAGE_SIZE)*PAGE_SIZE);
     if (*frameref & PE_P) return frameref;
     else return NULL;
 
