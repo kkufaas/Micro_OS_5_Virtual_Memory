@@ -332,7 +332,8 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
     }
 
-    // Insert the kernel page table into the page directory at the first entry, setting up the mapping for kernel space.
+    // Insert the kernel page table into the page directory at the first entry,
+    // setting up the mapping for kernel space.
     dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
 }
 
@@ -467,7 +468,8 @@ unsigned long generate_random_number() {
 
 /*
  * === Page Eviction and State Management ===
- * Functions to handle the eviction of pages, check if pages are dirty or free, and mark pages as used/free.
+ * Functions to handle the eviction of pages, check if pages 
+ * are dirty or free, and mark pages as used/free.
  */
  
 // Random eviction algorithm
@@ -498,7 +500,9 @@ bool is_page_dirty(uint32_t vaddr) {
 // }
 
 void unmap_physical_page(uint32_t vaddr) {
-    page_set_mode(kernel_pdir, vaddr, 0); // Given mode 0 clears the PE_P bit
+    // Eindride 8/04-22: 
+    // Changed kernel_pdir to current_running->page_directory
+    page_set_mode(current_running->page_directory, vaddr, 0); // Given mode 0 clears the PE_P bit
 }
 
 void mark_page_as_free(uint32_t page_number) {
