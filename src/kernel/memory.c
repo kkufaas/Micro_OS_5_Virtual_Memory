@@ -480,7 +480,6 @@ uint32_t select_page_for_eviction() {
 }
 
 // Checks if the given page is dirty by looking up its page table entry
-// Checks if the given page is dirty by looking up its page table entry
 bool is_page_dirty(uint32_t vaddr) {
     // Assuming `current_running` points to the currently running process control block (PCB)
     uint32_t dir_index = get_directory_index(vaddr);
