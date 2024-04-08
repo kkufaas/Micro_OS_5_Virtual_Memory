@@ -434,13 +434,13 @@ uint32_t vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
     return page + (vaddr & PAGE_MASK);
 }
 
-uint32_t vaddr_to_pageref(uint32_t vaddr, uint32_t *page_directory)
+uint32_t vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
 {
     uint32_t *page_table = get_page_table(vaddr, page_directory);
     return page_table[get_table_index(vaddr)];
 }
 
-uint32_t paddr_to_pageref(uint32_t paddr) {
+uint32_t paddr_to_frameref(uint32_t paddr) {
     // memory in kernel is identity mapped, so we can treat
     // the physical addres paddr as a virtual address inside
     // the kernel
