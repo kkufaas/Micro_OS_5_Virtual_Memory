@@ -505,9 +505,51 @@ void mark_page_as_free(uint32_t page_number) {
         free_pages_bitmap[index] |= (1 << bit);
     }
 }
+/*
+ * Given a virtual address and a pointer to the page directory, it
+ * returns a pointer to the relevant page table.
+ */
+uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) {
+    uint32_t dir_index = get_directory_index(vaddr);
+    uint32_t dir_entry = page_directory[dir_index];
+    if (!(dir_entry & PE_P)) {
+        return NULL;
+    }
+    // Extract the address of the page table from the directory entry.
+    uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
+    // Since we're operating within a simulated environment with direct kernel mapping, we directly return the page_table pointer. In a real OS, we'd need to translate
+    // this physical address to a virtual address accessible by the kernel.
+    return page_table;
+}
+
+// Calculates the disk offset for a given physical address.
+// Uses PAGING_AREA_MIN_PADDR as the base address for disk offset calculations.
+uint32_t calculate_disk_offset(uint32_t paddr) {
+    // Use the defined base address where the swap space or process images start.
+    const uint32_t DISK_BASE_ADDR = PAGING_AREA_MIN_PADDR;
+    // The offset is the difference from this base.
+    return paddr - DISK_BASE_ADDR;
+}
+
+
+void clear_page_dirty_bit(uint32_t vaddr) {
+    page_set_mode(kernel_pdir, vaddr, PE_P | PE_RW); // Resetting to Present and Read/Write, clearing the dirty bit.
+}
+
+
+void write_page_back_to_disk(uint32_t vaddr) {
+    // Since we use identity mapping, where every virtual address directly corresponds to 
+    // the same physical address
+    uint32_t paddr = vaddr; 
+    uint32_t disk_offset = calculate_disk_offset(paddr); 
+    // Clear the dirty bit for this page in the page table to simulate writing it back to disk
+    // Doesn't involve real disk I/O!
+    clear_page_dirty_bit(vaddr);
+    pr_debug("Page at virtual address 0x%08x written back to disk at offset 0x%08x\n", vaddr, disk_offset);
+}
 
 // Attempts to find and evict a page
-// Returns the physical address of the page that was evicted, or NULL if no suitable page was found.
+// Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
 uint32_t* try_evict_page() {
     for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
         uint32_t page_number = select_page_for_eviction();
@@ -516,14 +558,12 @@ uint32_t* try_evict_page() {
             if (is_page_dirty(page_number)) {
                 pr_debug("Write the page back to disk if it's dirty\n");
                 // Write the page back to disk if it's dirty
-                //TODO! update_page_table(page_number);
+                write_page_back_to_disk(vaddr);
             }
             // Unmap the page from the address space, marking it as not present
             unmap_physical_page(page_number);
-            // Mark the page as free for future use
             mark_page_as_free(page_number);
-            // Optionally, return the virtual or physical address of the evicted page
-            return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted
+            return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted to physical
         }
     }
     // Couldn't find a suitable page to evict.
