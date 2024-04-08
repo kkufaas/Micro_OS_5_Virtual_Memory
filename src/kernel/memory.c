@@ -10,19 +10,16 @@
 #define pr_fmt(fmt) "vmem: " fmt
 
 #include "memory.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
 #include <ansi_term/ansi_esc.h>
 #include <ansi_term/termbuf.h>
 #include <syslib/addrs.h>
 #include <syslib/common.h>
 #include <syslib/compiler_compat.h>
 #include <util/util.h>
-
 #include "lib/assertk.h"
 #include "lib/printk.h"
 #include "lib/todo.h"
@@ -150,10 +147,10 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
 
 
 /* === Initializes the bitmap to mark all pages as free === */
+
 void initialize_free_pages_bitmap() {
     // Using custom memset from string.h file
     // Multiply by sizeof(uint32_t) because the bitmap is an array of uint32_t, not bytes
-
     // marks all bits in free_pages as 1, recall 0xFF is one byte of set bits.
     memset(free_pages_bitmap, 0xFF, sizeof(free_pages_bitmap[0]) * BITMAP_SIZE);
 }
@@ -521,10 +518,7 @@ uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) {
     if (!(dir_entry & PE_P)) {
         return NULL;
     }
-    // Extract the address of the page table from the directory entry.
     uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
-    // Since we're operating within a simulated environment with direct kernel mapping, we directly return the page_table pointer. In a real OS, we'd need to translate
-    // this physical address to a virtual address accessible by the kernel.
     return page_table;
 }
 
@@ -538,21 +532,52 @@ uint32_t calculate_disk_offset(uint32_t paddr) {
 }
 
 
-void clear_page_dirty_bit(uint32_t vaddr) {
-    page_set_mode(kernel_pdir, vaddr, PE_P | PE_RW); // Resetting to Present and Read/Write, clearing the dirty bit.
+void clear_page_dirty_bit(uint32_t vaddr, uint32_t* page_directory) {
+    page_set_mode(page_directory, vaddr, PE_P | PE_RW); 
+}
+
+
+uint32_t virtual_to_physical_address(uint32_t vaddr, uint32_t* page_directory) {
+    uint32_t dir_index = get_directory_index(vaddr);
+    uint32_t dir_entry = page_directory[dir_index];
+
+    if (!(dir_entry & PE_P)) {
+        return 0;
+    }
+    uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
+    uint32_t table_index = get_table_index(vaddr);
+    uint32_t page_entry = page_table[table_index];
+
+    if (!(page_entry & PE_P)) {
+        return 0;
+    }
+    // Extract the physical address from the page table entry and the offset from the virtual address.
+    uint32_t page_offset = vaddr & PAGE_MASK;
+    uint32_t physical_page_start = page_entry & PE_BASE_ADDR_MASK;
+    return physical_page_start + page_offset;
 }
 
 
 void write_page_back_to_disk(uint32_t vaddr) {
-    // Since we use identity mapping, where every virtual address directly corresponds to 
-    // the same physical address
-    uint32_t paddr = vaddr; 
-    uint32_t disk_offset = calculate_disk_offset(paddr); 
-    // Clear the dirty bit for this page in the page table to simulate writing it back to disk
-    // Doesn't involve real disk I/O!
-    clear_page_dirty_bit(vaddr);
+    uint32_t *page_directory;
+    // if current_running is not NULL, we assume user mode and use its page directory.
+    if (current_running != NULL) {
+        page_directory = current_running->page_directory;
+    } else {
+        page_directory = kernel_pdir; // Use the shared kernel page directory in kernel mode.
+    }
+
+    // Translate the virtual address to its corresponding physical address.
+    uint32_t paddr = virtual_to_physical_address(vaddr, page_directory);
+
+    // Calculate the disk offset based on the physical address.
+    uint32_t disk_offset = calculate_disk_offset(paddr);
+
+    // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
+    clear_page_dirty_bit(vaddr, page_directory);
     pr_debug("Page at virtual address 0x%08x written back to disk at offset 0x%08x\n", vaddr, disk_offset);
 }
+
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
