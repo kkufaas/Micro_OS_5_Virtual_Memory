@@ -422,30 +422,6 @@ void setup_process_vmem(pcb_t *p) {
     lock_release(&page_map_lock);
 }
 
-uint32_t vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
-{
-    /*
-     * perform a lookup in page directory
-     * to extract physical address
-     */
-    uint32_t index = get_table_index(vaddr);
-    uint32_t *page_table = get_page_table(vaddr, page_directory);
-    uint32_t *page = page_table[index];
-    return page + (vaddr & PAGE_MASK);
-}
-
-uint32_t vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
-{
-    uint32_t *page_table = get_page_table(vaddr, page_directory);
-    return page_table[get_table_index(vaddr)];
-}
-
-uint32_t paddr_to_frameref(uint32_t paddr) {
-    // memory in kernel is identity mapped, so we can treat
-    // the physical addres paddr as a virtual address inside
-    // the kernel
-    return vaddr_to_pageref(paddr, kernel_pdir);
-}
 
 
 /*
@@ -559,6 +535,33 @@ uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) {
     uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
     return page_table;
 }
+
+uint32_t vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
+{
+    /*
+     * perform a lookup in page directory
+     * to extract physical address
+     */
+    uint32_t index = get_table_index(vaddr);
+    uint32_t *page_table = get_page_table(vaddr, page_directory);
+    uint32_t *page = page_table[index];
+    return page + (vaddr & PAGE_MASK);
+}
+
+uint32_t vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
+{
+    uint32_t *page_table = get_page_table(vaddr, page_directory);
+    return page_table[get_table_index(vaddr)];
+}
+
+uint32_t paddr_to_frameref(uint32_t paddr) {
+    // memory in kernel is identity mapped, so we can treat
+    // the physical addres paddr as a virtual address inside
+    // the kernel
+    return vaddr_to_pageref(paddr, kernel_pdir);
+}
+
+
 
 // Calculates the disk offset for a given physical address.
 // Uses PAGING_AREA_MIN_PADDR as the base address for disk offset calculations.
