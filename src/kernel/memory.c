@@ -35,15 +35,17 @@
 #define HASH_TABLE_SIZE 1024
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 #define KERNEL_SIZE 0x300000 // 3 MB in hexadecimal
-uint32_t free_pages_bitmap[BITMAP_SIZE]; // A bitmap for tracking free pages, being initialized in init_memory
-static unsigned long next = 1; // Used in random function
 
+// A bitmap for tracking free pages, being initialized in init_memory
+uint32_t free_pages_bitmap[BITMAP_SIZE]; 
+
+static unsigned long next = 1; // Used in random function
 
 #define MEMDEBUG 1
 #define DEBUG_PAGEFAULT 1
 #define MEM_DEBUG_LOADPROC 1
 
-#define STACK_SIZE 0x1000 // two pages - same as kernel level stacks
+#define USER_STACK_SIZE 0x1000 
 
 /* === Simple memory allocation === */
 
@@ -151,6 +153,8 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
 void initialize_free_pages_bitmap() {
     // Using custom memset from string.h file
     // Multiply by sizeof(uint32_t) because the bitmap is an array of uint32_t, not bytes
+
+    // marks all bits in free_pages as 1, recall 0xFF is one byte of set bits.
     memset(free_pages_bitmap, 0xFF, sizeof(free_pages_bitmap[0]) * BITMAP_SIZE);
 }
 
@@ -400,7 +404,7 @@ void setup_process_vmem(pcb_t *p) {
     // Allocate pages of stack area
     // assuming a fixed size stack area for each process
     uint32_t *stack_page, stack_vaddr;
-    uint32_t stack_lim = PROCESS_STACK_VADDR - STACK_SIZE;
+    uint32_t stack_lim = PROCESS_STACK_VADDR - USER_STACK_SIZE;
     uint32_t stack_base = PROCESS_STACK_VADDR;
     for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
         stack_page = allocate_page();
