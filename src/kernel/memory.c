@@ -49,6 +49,113 @@ static unsigned long next = 1; // Used in random function
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
 
+///////////////////////////////////////////////////////
+// similar (but static) datastructure as in INF1100
+// google-clone exam to link physical and virtual adresses
+//
+// python size calculation for 4GB mem system:
+// >>> GB = 1024**3
+// >>> page_size = 4*1024
+// >>> page_frame_info_size = 4*4 + 1
+// >>> ((4) - (4*GB - (4*GB/page_size)*2*page_frame_info_size)/(GB))*(1024)
+// 34.0 
+//
+// i.e, the current info will use ~34 MB of memory
+// if everything is pageable and one assumes all memory
+// is shareable --> considerable optimization still possible
+///////////////////////////////////////////////////////
+
+//
+// idea from hashmaps: collisions only for physical
+// pages shared between different processes
+//
+
+typedef struct page_frame_info {
+    pcb_t *owner;
+    page_frame_info_t *next_shared_info; // the next info frame like this
+    uintptr_t paddr;
+    uintptr_t vaddr;
+    uint8_t pinned;
+} page_frame_info_t;
+
+page_frame_info_t page_frame_info[PAGEABLE_PAGES];
+page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
+
+void initialize_page_frame_infos(void) {
+    for (int i = 0; i < PAGEABLE_PAGES; i++) {
+        page_frame_info[i].owner = NULL;
+        page_frame_info[i].next_shared_info = NULL;
+        page_frame_info[i].paddr = NULL;
+        page_frame_info[i].vaddr = NULL;
+        page_frame_info[i].pinned = 0;
+
+        page_frame_info_shared[i].owner = NULL;
+        page_frame_info_shared[i].next_shared_info = NULL;
+        page_frame_info_shared[i].paddr = NULL;
+        page_frame_info_shared[i].vaddr = NULL;
+        page_frame_info_shared[i].pinned = 0;
+    }
+}
+
+uint32_t calculate_info_index(uint32_t paddr)
+{
+    return (paddr - PAGING_AREA_MIN_PADDR)/PAGE_SIZE;
+}
+
+page_frame_info_t*
+insert_page_frame_info(uintptr_t paddr, uintptr_t vaddr, 
+                        pcb_t *owner_pcb, uint8_t pinned)
+{
+    uint32_t index = calculate_info_index(paddr);
+    if (page_frame_info[index].owner) {
+        page_frame_info_t *next_info = &page_frame_info[index];
+        page_frame_info_t *final_info;
+
+        // find the last infostruct in the chain
+        while (next_info) {
+            if ( (next_info = next_info -> next_shared_info) ) {
+                final_info = next_info;
+            }
+        }
+
+        // try same index in the shared infostruct array 
+        if (!page_frame_info_shared[index].owner) {
+            page_frame_info_t new_info = page_frame_info_shared[index];
+            final_info -> next_shared_info  = &new_info;
+            new_info.owner = owner_pcb;
+            new_info.paddr = paddr;
+            new_info.vaddr = vaddr;
+            new_info.pinned = pinned;
+            return &new_info;
+        } else {
+            int j = 0;
+            for (int i = index; j < PAGEABLE_PAGES; i++, j++) {
+                if (!page_frame_info_shared[i].owner) {
+                    page_frame_info_t new_info = page_frame_info_shared[i];
+                    final_info -> next_shared_info  = &new_info;
+                    new_info.owner = owner_pcb;
+                    new_info.paddr = paddr;
+                    new_info.vaddr = vaddr;
+                    new_info.pinned = pinned;
+                    return &new_info;
+                }
+            }
+        }
+
+    } else {
+        page_frame_info_t frame_info = page_frame_info[index];
+        frame_info.owner = owner_pcb;
+        frame_info.next_shared_info = NULL;
+        frame_info.paddr = paddr;
+        frame_info.vaddr = vaddr;
+        frame_info.pinned = pinned;
+    }
+
+}
+
+
+////////////////////////////////////////////////////
+
 /*
  * Allocate contiguous bytes of memory aligned to a page boundary
  *
@@ -143,10 +250,6 @@ void insertPinnedPage(uint32_t vpn, bool pinned) {
     newEntry->next = pinnedHashTable[index];
     pinnedHashTable[index] = newEntry;
 }
-
-
-
-
 
 
 /* === Initializes the bitmap to mark all pages as free === */
@@ -639,10 +742,12 @@ uint32_t virtual_to_physical_address(uint32_t vaddr, uint32_t* page_directory) {
 void write_page_back_to_disk(uint32_t vaddr) {
     uint32_t *page_directory;
     // if current_running is not NULL, we assume user mode and use its page directory.
+    // should current running ever be NULL?
     if (current_running != NULL) {
         page_directory = current_running->page_directory;
     } else {
-        page_directory = kernel_pdir; // Use the shared kernel page directory in kernel mode.
+        // Use the shared kernel page directory in kernel mode.
+        page_directory = kernel_pdir; 
     }
 
     // Translate the virtual address to its corresponding physical address.
@@ -678,6 +783,32 @@ uint32_t* try_evict_page() {
     // Couldn't find a suitable page to evict.
     return NULL;
 }
+
+// Attempts to find and evict a page
+// Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
+uint32_t* try_evict_page_v2() {
+    uint32_t *frameref, frameref_addr;
+    uint32_t *base = (uint32_t *) PAGING_AREA_MIN_PADDR;
+    for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
+        //uint32_t page_number = select_page_for_eviction();
+        frameref_addr = PAGING_AREA_MIN_PADDR + attempts*PAGE_SIZE;
+
+        if( (frameref = paddr_to_frameref(frameref_addr)) ) {
+            // physical page present
+
+            // TODO: check if frameref is pinned
+            // ....
+            ///////////////////////////////
+        } else {
+            // physical page not present
+        }
+
+    }
+    // Couldn't find a suitable page to evict.
+    return NULL;
+}
+
+
 
 /*
  * Handle page fault
