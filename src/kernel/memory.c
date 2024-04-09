@@ -74,8 +74,8 @@ static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
 struct page_frame_info {
     pcb_t *owner;
     struct page_frame_info *next_shared_info; // the next info frame like this
-    uintptr_t paddr;
-    uintptr_t vaddr;
+    uintptr_t *paddr;
+    uintptr_t *vaddr;
     uint8_t pinned;
 };
 typedef struct page_frame_info page_frame_info_t;
@@ -99,19 +99,24 @@ void initialize_page_frame_infos(void) {
     }
 }
 
-uint32_t calculate_info_index(uint32_t paddr)
+uint32_t calculate_info_index(uintptr_t *paddr)
 {
-    return (paddr - PAGING_AREA_MIN_PADDR)/PAGE_SIZE;
+    return ((uint32_t)paddr - PAGING_AREA_MIN_PADDR)/PAGE_SIZE;
 }
 
+/*
+ * Returns and index into the inserted info struct
+ * 
+*/
 page_frame_info_t*
-insert_page_frame_info(uintptr_t paddr, uintptr_t vaddr, 
+insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr, 
                         pcb_t *owner_pcb, uint8_t pinned)
 {
     uint32_t index = calculate_info_index(paddr);
     if (page_frame_info[index].owner) {
         page_frame_info_t *next_info = &page_frame_info[index];
-        page_frame_info_t *final_info;
+        
+        page_frame_info_t *final_info = next_info;
 
         // find the last infostruct in the chain
         while (next_info) {
@@ -122,35 +127,37 @@ insert_page_frame_info(uintptr_t paddr, uintptr_t vaddr,
 
         // try same index in the shared infostruct array 
         if (!page_frame_info_shared[index].owner) {
-            page_frame_info_t new_info = page_frame_info_shared[index];
-            final_info -> next_shared_info  = &new_info;
-            new_info.owner = owner_pcb;
-            new_info.paddr = paddr;
-            new_info.vaddr = vaddr;
-            new_info.pinned = pinned;
-            return &new_info;
+            page_frame_info_t *new_info = &page_frame_info_shared[index];
+            final_info -> next_shared_info = new_info;
+            new_info->owner = owner_pcb;
+            new_info->paddr = paddr;
+            new_info->vaddr = vaddr;
+            new_info->pinned = pinned;
+            return new_info;
         } else {
             int j = 0;
             for (int i = index; j < PAGEABLE_PAGES; i++, j++) {
                 if (!page_frame_info_shared[i].owner) {
-                    page_frame_info_t new_info = page_frame_info_shared[i];
-                    final_info -> next_shared_info  = &new_info;
-                    new_info.owner = owner_pcb;
-                    new_info.paddr = paddr;
-                    new_info.vaddr = vaddr;
-                    new_info.pinned = pinned;
-                    return &new_info;
+                    page_frame_info_t *new_info = &page_frame_info_shared[i];
+                    final_info -> next_shared_info  = new_info;
+                    new_info->owner = owner_pcb;
+                    new_info->paddr = paddr;
+                    new_info->vaddr = vaddr;
+                    new_info->pinned = pinned;
+                    return new_info;
                 }
             }
+            // no suitable slot for a page found
+            return NULL;
         }
-
     } else {
-        page_frame_info_t frame_info = page_frame_info[index];
-        frame_info.owner = owner_pcb;
-        frame_info.next_shared_info = NULL;
-        frame_info.paddr = paddr;
-        frame_info.vaddr = vaddr;
-        frame_info.pinned = pinned;
+        page_frame_info_t *new_info = &page_frame_info[index];
+        new_info->owner = owner_pcb;
+        new_info->next_shared_info = NULL;
+        new_info->paddr = paddr;
+        new_info->vaddr = vaddr;
+        new_info->pinned = pinned;
+        return new_info;
     }
 
 }
