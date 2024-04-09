@@ -32,22 +32,24 @@
 #define HASH_TABLE_SIZE 1024
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 #define KERNEL_SIZE 0x300000 // 3 MB in hexadecimal
-
 // A bitmap for tracking free pages, being initialized in init_memory
 uint32_t free_pages_bitmap[BITMAP_SIZE]; 
-
 static unsigned long next = 1; // Used in random function
-
 #define MEMDEBUG 1
 #define DEBUG_PAGEFAULT 1
 #define MEM_DEBUG_LOADPROC 1
-
 #define USER_STACK_SIZE 0x1000 
 
 /* === Simple memory allocation === */
 
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
+static pcb_t *dummy_kernel_pcb = alloc_pcb();
+
+enum {
+    PE_USER              = 1 << 0,     /* user */
+    PE_PINNED            = 1 << 1,     /* pinned */
+};
 
 ///////////////////////////////////////////////////////
 // similar (but static) datastructure as in INF1100
@@ -205,61 +207,6 @@ void free_memory(uint32_t ptr)
     spinlock_release(&next_free_mem_lock);
 }
 
-/*
- * === Pinned Page Tracking ===
- * Functions for managing pinned pages, which should not be swapped out.
- */
-
-typedef struct PinnedPageEntry {
-    uint32_t vpn; // Virtual Page Number
-    bool pinned;  // Whether the page is pinned
-    struct PinnedPageEntry* next; // For handling collisions via chaining
-} PinnedPageEntry;
-
-PinnedPageEntry* pinnedHashTable[HASH_TABLE_SIZE];
-PinnedPageEntry* entryBlock = NULL; // Pointer to a block of entries
-size_t entriesAllocated = 0;        // Number of entries allocated from the block
-size_t entriesPerBlock = 4096 / sizeof(PinnedPageEntry); 
-
-unsigned int hashFunction(uint32_t vpn) {
-    return vpn % HASH_TABLE_SIZE;
-}
-
-PinnedPageEntry* allocateEntry() {
-    if (entryBlock == NULL || entriesAllocated >= entriesPerBlock) {
-        // Allocate a new block if needed
-        entryBlock = (PinnedPageEntry*)alloc_memory(4096); // Allocates a full page
-        entriesAllocated = 0;
-    }
-    return &entryBlock[entriesAllocated++];
-}
-
-bool isPagePinned(uint32_t vpn) {
-    unsigned int index = hashFunction(vpn);
-    PinnedPageEntry* entry = pinnedHashTable[index];
-    while (entry) {
-        if (entry->vpn == vpn) {
-            return entry->pinned;
-        }
-        entry = entry->next;
-    }
-    return false;
-}
-
-void insertPinnedPage(uint32_t vpn, bool pinned) {
-    PinnedPageEntry* newEntry = allocateEntry();
-    if (newEntry == NULL) {
-        return;
-    }
-    newEntry->vpn = vpn;
-    newEntry->pinned = pinned;
-    unsigned int index = hashFunction(vpn);
-
-    // Collision resolution by chaining
-    newEntry->next = pinnedHashTable[index];
-    pinnedHashTable[index] = newEntry;
-}
-
 
 /* === Initializes the bitmap to mark all pages as free === */
 
@@ -406,12 +353,6 @@ uint32_t* allocate_page(void) {
     return page;
 }
 
-uint32_t page_number_to_virtual_address(uint32_t page_number) {
-
-    return page_number * PAGE_SIZE;
-}
-
-
 
 /* === Kernel and process setup === */
 
@@ -426,7 +367,7 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
 
     // Allocate and "pin" the page table to ensure it's not swapped out.
     uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
-    insertPinnedPage(kernel_ptable_number, true);
+    insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb,1);
 
     /* Set the appropriate access flag (user or kernel) for the video buffer page at 0xb8000.
      * Identity maps the video memory from 0xb8000-0xb8fff for direct access.
@@ -495,8 +436,9 @@ void setup_process_vmem(pcb_t *p) {
     // Calculate the (physical) page number of the page table and page dirs and pin them
     uint32_t proc_ptable_number = ((uintptr_t)proc_ptable) >> PAGE_TABLE_BITS; 
     uint32_t proc_pdir_number = ((uintptr_t)proc_pdir) >> PAGE_TABLE_BITS; 
-    insertPinnedPage(proc_ptable_number, true);
-    insertPinnedPage(proc_pdir_number, true);
+    insert_page_frame_info(proc_ptable, proc_ptable, p,1);
+    insert_page_frame_info(proc_pdir, proc_pdir,p,1);
+
 
     // Map it into the second entry of the page directory
     // set as present since it is a page table.
