@@ -367,6 +367,14 @@ static inline void enable_paging()
     );
 }
 
+/* get current pagedir */
+static inline uintptr_t load_current_page_directory()
+{
+    uintptr_t cr3;
+    asm inline volatile("mov    %%cr3, %0" :: "r"(cr3));
+    return cr3;
+}
+
 /* Read page-fault address from the CR2 register */
 static inline uintptr_t load_page_fault_addr()
 {

@@ -44,15 +44,19 @@ static unsigned long next = 1; // Used in random function
 
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
-static pcb_t *dummy_kernel_pcb = alloc_pcb();
+static pcb_t dummy_kernel_pcb[1]; 
 
 enum {
-    PE_USER              = 1 << 0,     /* user */
-    PE_PINNED            = 1 << 1,     /* pinned */
+    PE_INFO_USER_MODE              = 1 << 0,     /* user */
+    PE_INFO_KERNEL                 = 1 << 1,     /* kernel ''dummy'' */
+    PE_INFO_PINNED                 = 1 << 2,     /* pinned */
 };
 
+inline uint32_t get_table_index(uint32_t vaddr);
+uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory);
+ 
 ///////////////////////////////////////////////////////
-// similar (but static) datastructure as in INF1100
+// similar (but static) datastructure as in INF1101
 // google-clone exam to link physical and virtual adresses
 //
 // python size calculation for 4GB mem system:
@@ -78,9 +82,15 @@ struct page_frame_info {
     struct page_frame_info *next_shared_info; // the next info frame like this
     uintptr_t *paddr;
     uintptr_t *vaddr;
-    uint8_t pinned;
+    uint32_t info_mode;
 };
 typedef struct page_frame_info page_frame_info_t;
+
+int is_pinned(page_frame_info_t *frame_info)
+{
+    return (frame_info -> info_mode) & PE_INFO_PINNED;
+}
+
 
 page_frame_info_t page_frame_info[PAGEABLE_PAGES];
 page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
@@ -91,16 +101,19 @@ void initialize_page_frame_infos(void) {
         page_frame_info[i].next_shared_info = NULL;
         page_frame_info[i].paddr = NULL;
         page_frame_info[i].vaddr = NULL;
-        page_frame_info[i].pinned = 0;
+        page_frame_info[i].info_mode = 0;
 
         page_frame_info_shared[i].owner = NULL;
         page_frame_info_shared[i].next_shared_info = NULL;
         page_frame_info_shared[i].paddr = NULL;
         page_frame_info_shared[i].vaddr = NULL;
-        page_frame_info_shared[i].pinned = 0;
+        page_frame_info_shared[i].info_mode = 0;
     }
 }
 
+/*
+ * "Hashing" function carrying physical page addresses into the info struct array 
+ */
 uint32_t calculate_info_index(uintptr_t *paddr)
 {
     return ((uint32_t)paddr - PAGING_AREA_MIN_PADDR)/PAGE_SIZE;
@@ -112,7 +125,7 @@ uint32_t calculate_info_index(uintptr_t *paddr)
 */
 page_frame_info_t*
 insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr, 
-                        pcb_t *owner_pcb, uint8_t pinned)
+                        pcb_t *owner_pcb, uint32_t info_mode)
 {
     uint32_t index = calculate_info_index(paddr);
     if (page_frame_info[index].owner) {
@@ -134,7 +147,7 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
             new_info->owner = owner_pcb;
             new_info->paddr = paddr;
             new_info->vaddr = vaddr;
-            new_info->pinned = pinned;
+            new_info->info_mode = info_mode;
             return new_info;
         } else {
             int j = 0;
@@ -145,7 +158,7 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
                     new_info->owner = owner_pcb;
                     new_info->paddr = paddr;
                     new_info->vaddr = vaddr;
-                    new_info->pinned = pinned;
+                    new_info->info_mode = info_mode;
                     return new_info;
                 }
             }
@@ -158,12 +171,77 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
         new_info->next_shared_info = NULL;
         new_info->paddr = paddr;
         new_info->vaddr = vaddr;
-        new_info->pinned = pinned;
+        new_info->info_mode = info_mode;
         return new_info;
     }
 
 }
 
+
+/*
+ *  lookup all page dirs and page tables that
+ *  contain references to the physical address paddr
+ *  and set the mode
+ */
+// int traverse_pages(uintptr_t *paddr, uint32_t mode)
+// {
+//     uint32_t info_index = calculate_info_index(paddr);
+//     page_frame_info_t *info = &page_frame_info[info_index];
+//     // process vaddr of info
+//     
+// 
+//     while (info -> next_shared_info) {
+//         // process next_shared_info
+//     }
+//     //page_set_mode
+// }
+
+
+int trav_evict_vaddr_helper(uint32_t current_vaddr, uint32_t *current_page_dir) {
+    int dirty = 0;
+    // check if dirty
+    uint32_t current_table_index = get_table_index(current_vaddr);
+    uint32_t *current_table = get_page_table(current_table_index, current_page_dir);
+    dirty = current_table[current_table_index] & PE_D;
+    // reset dirtyness bit in table by anding with not(PE_D)
+    current_table[current_table_index] &= ~PE_D;
+
+    // set not present bit
+    current_table[current_table_index] &= ~PE_P;
+
+    return dirty;
+}
+
+/*
+ * Processes all page tables with a reference to the physical address paddr.
+ * Checks if the pages are dirty
+ * Returns  0 when not dirty
+ * Returns 1 when dirty
+ * 
+ */
+int traverse_evict(uintptr_t *paddr) {
+    int dirty = 0;
+
+    uint32_t info_index = calculate_info_index(paddr);
+    page_frame_info_t *info = &page_frame_info[info_index];
+    uint32_t *current_pdir= info -> owner -> page_directory;
+    uint32_t current_vaddr = (uint32_t) info -> vaddr;
+
+    // process vaddr of info
+
+    // check if dirty
+    dirty = trav_evict_vaddr_helper(current_vaddr, current_pdir);
+    while (info -> next_shared_info) {
+        // process next_shared_info
+        info = info -> next_shared_info;
+        current_pdir= info -> owner -> page_directory;
+        current_vaddr = (uint32_t) info -> vaddr;
+        dirty += trav_evict_vaddr_helper(current_vaddr, current_pdir);
+    }
+    //page_set_mode
+
+    return dirty;
+}
 
 ////////////////////////////////////////////////////
 
@@ -366,7 +444,7 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     uint32_t *kernel_ptable = allocate_page();
 
     // Allocate and "pin" the page table to ensure it's not swapped out.
-    uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
+    // uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
     insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb,1);
 
     /* Set the appropriate access flag (user or kernel) for the video buffer page at 0xb8000.
@@ -396,10 +474,12 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
 }
 
 
-
 static void setup_kernel_vmem(void) {
+    dummy_kernel_pcb -> is_thread = 1;
+    uint32_t info_mode = PE_INFO_PINNED | PE_INFO_KERNEL;
     lock_acquire(&page_map_lock);
     kernel_pdir = allocate_page();
+    insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
     setup_kernel_vmem_common(kernel_pdir, 0);
     lock_release(&page_map_lock);
 }
@@ -434,10 +514,10 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t *proc_ptable = allocate_page();
 
     // Calculate the (physical) page number of the page table and page dirs and pin them
-    uint32_t proc_ptable_number = ((uintptr_t)proc_ptable) >> PAGE_TABLE_BITS; 
-    uint32_t proc_pdir_number = ((uintptr_t)proc_pdir) >> PAGE_TABLE_BITS; 
-    insert_page_frame_info(proc_ptable, proc_ptable, p,1);
-    insert_page_frame_info(proc_pdir, proc_pdir,p,1);
+    //uint32_t proc_ptable_number = ((uintptr_t)proc_ptable) >> PAGE_TABLE_BITS; 
+    // uint32_t proc_pdir_number = ((uintptr_t)proc_pdir) >> PAGE_TABLE_BITS; 
+    insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
+    insert_page_frame_info(proc_pdir, proc_pdir,p, PE_INFO_PINNED);
 
 
     // Map it into the second entry of the page directory
@@ -453,7 +533,7 @@ void setup_process_vmem(pcb_t *p) {
      */
     uint32_t paddr, vaddr, offset;
     for (offset = 0; offset < p->swap_size; offset += PAGE_SIZE) {
-        paddr = p->swap_loc + offset;
+        paddr = p->swap_loc + offset; // page not present - anything works
         vaddr = PROCESS_VADDR + offset;
         table_map_page(proc_ptable, vaddr, paddr, user_mode);
     }
@@ -522,6 +602,7 @@ void init_memory(void)
 /* === Page Fault Handler Helper Functions === */
 
 // Generates a pseudo-random number using a linear congruential generator.
+// paddr of a page is then result*PAGE_SIZE + PAGING_AREA_MIN_PADDR
 unsigned long generate_random_number() {
     next = next * 1103515245 + 12345;
     return (unsigned long)(next/65536) % 32768;
@@ -536,14 +617,15 @@ unsigned long generate_random_number() {
 // Random eviction algorithm
 uint32_t select_page_for_eviction() {
     uint32_t random_page_number = generate_random_number() % PAGEABLE_PAGES;
-    return random_page_number;
+    return random_page_number*PAGE_SIZE + PAGING_AREA_MIN_PADDR;
+    //return random_page_number;
 }
 
 // Checks if the given page is dirty by looking up its page table entry
-bool is_page_dirty(uint32_t vaddr) {
+bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory) {
     // Assuming `current_running` points to the currently running process control block (PCB)
     uint32_t dir_index = get_directory_index(vaddr);
-    uint32_t dir_entry = current_running->page_directory[dir_index];
+    uint32_t dir_entry = page_directory[dir_index];
     if (!(dir_entry & PE_P)) {
         // Page directory entry is not present.
         return false;
@@ -554,11 +636,6 @@ bool is_page_dirty(uint32_t vaddr) {
     return (page_entry & PE_D) != 0;
 }
 
-
-// bool is_page_dirty_user(uint32_t vaddr, uint32_t* page_directory) {
-//     // We might need this version of the function that would take an additional parameter for the page directory,
-//     // allowing it to be used with any process's address space, not just the kernel's...
-// }
 
 void unmap_physical_page(uint32_t vaddr) {
     // Eindride 8/04-22: 
@@ -580,7 +657,8 @@ void mark_page_as_free(uint32_t page_number) {
  * Given a virtual address and a pointer to the page directory, it
  * returns a pointer to the relevant page table.
  */
-uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) {
+uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory) 
+{
     uint32_t dir_index = get_directory_index(vaddr);
     uint32_t dir_entry = page_directory[dir_index];
     if (!(dir_entry & PE_P)) {
@@ -717,18 +795,23 @@ void write_page_back_to_disk(uint32_t vaddr) {
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
 uint32_t* try_evict_page() {
     for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
-        uint32_t page_number = select_page_for_eviction();
-        if (!isPagePinned(page_number)) {
-            uint32_t vaddr = page_number_to_virtual_address(page_number);
-            if (is_page_dirty(page_number)) {
-                pr_debug("Write the page back to disk if it's dirty\n");
-                // Write the page back to disk if it's dirty
-                write_page_back_to_disk(vaddr);
-            }
-            // Unmap the page from the address space, marking it as not present
-            unmap_physical_page(page_number);
-            mark_page_as_free(page_number);
-            return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted to physical
+        uintptr_t *frameref = (uintptr_t *) select_page_for_eviction();
+        uint32_t info_index = calculate_info_index(frameref);
+        page_frame_info_t *frame_info = &page_frame_info[info_index];
+
+        if (!is_pinned(frame_info)) {
+            // traverse all the page dirs and page refs
+
+        //if (is_page_dirty(page_number)) {
+        //         pr_debug("Write the page back to disk if it's dirty\n");
+        //         // Write the page back to disk if it's dirty
+        //         write_page_back_to_disk(vaddr);
+        //     }
+        //     // Unmap the page from the address space, marking it as not present
+        //     unmap_physical_page(page_number);
+        //     mark_page_as_free(page_number);
+        //     return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted to physical
+        //
         }
     }
     // Couldn't find a suitable page to evict.
