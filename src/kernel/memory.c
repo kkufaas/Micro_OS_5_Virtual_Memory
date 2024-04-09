@@ -70,13 +70,15 @@ static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
 // pages shared between different processes
 //
 
-typedef struct page_frame_info {
+
+struct page_frame_info {
     pcb_t *owner;
-    page_frame_info_t *next_shared_info; // the next info frame like this
+    struct page_frame_info *next_shared_info; // the next info frame like this
     uintptr_t paddr;
     uintptr_t vaddr;
     uint8_t pinned;
-} page_frame_info_t;
+};
+typedef struct page_frame_info page_frame_info_t;
 
 page_frame_info_t page_frame_info[PAGEABLE_PAGES];
 page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
