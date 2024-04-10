@@ -814,7 +814,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
         return success; 
     }
     uint32_t disk_sector = disk_offset / SECTOR_SIZE;
-    /int32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
+    int32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
     uint32_t *frameref = frameref_table[get_table_index(vaddr)];
     // if (frameref == NULL) {
     //     pr_debug("Failed to allocate frame for virtual address 0x%08x\n", vaddr);
@@ -828,7 +828,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     // Calculate physical address from the frame reference ('frame' points to the beginning of the page frame).
     //uint32_t paddr = (uint32_t)frame; // Direct mapping???
     //update_page_table(vaddr, paddr, pcb->page_directory, PE_P | PE_RW | PE_US);
-    pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, paddr);
+    pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, frameref);
     return success; 
 }
 
