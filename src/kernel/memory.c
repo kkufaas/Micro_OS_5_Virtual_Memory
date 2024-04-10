@@ -812,14 +812,14 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
 
 }
 
-int load_page_from_disk(vaddr, pcb_t *pcb) {
+int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 
 }
 
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
-uint32_t* try_evict_page() {
+uint32_t* try_evict_page2() {
 
     int dirty;
     uintptr_t *frameref;
