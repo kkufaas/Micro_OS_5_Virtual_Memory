@@ -98,16 +98,48 @@ struct page_frame {
 };
 typedef struct page_frame page_frame_t;
 page_frame_t free_pages[PAGEABLE_PAGES];
+page_frame_t* free_pages_head = &free_pages[0];
 
+// void initialize_free_pages() {
+//     free_pages[0].address = PAGING_AREA_MIN_PADDR;
+//     for (int i = 1; i < PAGEABLE_PAGES; i++) {
+//         free_pages[i - 1].next_free = &free_pages[i];
+//         free_pages[i].address = PAGING_AREA_MIN_PADDR + i*PAGE_SIZE;
+//     }
+//     free_pages[PAGEABLE_PAGES].next_free = &free_pages[0];
+// }
+
+
+//Non-circular version
 void initialize_free_pages() {
     free_pages[0].address = PAGING_AREA_MIN_PADDR;
-    for (int i = 1; i < PAGEABLE_PAGES; i++) {
+    for (int i = 1; i < PAGEABLE_PAGES - 1; i++) {
         free_pages[i - 1].next_free = &free_pages[i];
         free_pages[i].address = PAGING_AREA_MIN_PADDR + i*PAGE_SIZE;
     }
-    free_pages[PAGEABLE_PAGES].next_free = &free_pages[0];
+    free_pages[PAGEABLE_PAGES - 1].next_free = NULL;
 }
 
+void add_page_frame_to_free_list(uint32_t address) {
+    // Convert 'address' to its corresponding index in the free_pages array
+    int index = (address - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
+    page_frame_t* page_frame = &free_pages[index];
+    // Prepend this page_frame to the start of the free list
+    page_frame->next_free = free_pages_head;
+    free_pages_head = page_frame;
+}
+
+page_frame_t* remove_page_frame_from_free_list() {
+    if (free_pages_head == NULL) {
+        // No free page frames available
+        return NULL;
+    }
+    // Take the first page frame from the free list
+    page_frame_t* allocated_page_frame = free_pages_head;
+    free_pages_head = allocated_page_frame->next_free; // Move head to the next frame
+    allocated_page_frame->next_free = NULL; // Clear the next pointer
+    return allocated_page_frame;
+}
 
 
 //Not in use
@@ -625,13 +657,6 @@ void unmap_physical_page(uint32_t vaddr) {
     page_set_mode(current_running->page_directory, vaddr, 0); 
 }
 
-void mark_page_as_free(uint32_t page_number) {
-    if (page_number < PAGEABLE_PAGES) {
-        uint32_t index = page_number / BITS_PER_ENTRY;
-        uint32_t bit = page_number % BITS_PER_ENTRY;
-        free_pages_bitmap[index] |= (1 << bit);
-    }
-}
 
 /*
  * Given a virtual address and a pointer to the page directory, it
@@ -816,42 +841,36 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
 uint32_t* try_evict_page() {
-    int dirty;
     uintptr_t *frameref;
     uint32_t info_index;
     page_frame_info_t *frame_info;
     //uint32_t *base = (uint32_t *) PAGING_AREA_MIN_PADDR;
+
     for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
-        dirty = 0;
         frameref = (uintptr_t *) select_page_for_eviction();
         info_index = calculate_info_index(frameref);
         frame_info = &page_frame_info[info_index];
-        if (frame_info -> info_mode & PE_INFO_PINNED) {
-            continue;
-        }
-        dirty = traverse_evict(frameref);
-        if (dirty > 0) {
-            // write to disc
-            // add case is we failed to write back to disk, continue to try another page.
+        if (!(frame_info -> info_mode & PE_INFO_PINNED)) {
+            // Check if the page is dirty before deciding to evict
+            int dirty = traverse_evict(frame_info->paddr);
+                if (dirty > 0) {
+                // The page is dirty, write it back to disk
+                write_page_back_to_disk(*frame_info->vaddr, frame_info->owner);
+                // Proceed to unmap the page
+                unmap_physical_page(*frame_info->vaddr);
+                add_page_frame_to_free_list((uint32_t)frame_info->paddr);
+                return frame_info->vaddr; // Return the virtual address of the evicted page
+
         } else if (dirty == 0) {
-            // not dirty, nothing to do, everything handled by traverse_evict
+                // The page is not dirty, proceed with eviction directly
+                unmap_physical_page(*frame_info->vaddr);
+                add_page_frame_to_free_list((uint32_t)frame_info->paddr);
+                return frame_info->vaddr;
         } else {
             // page must not be evicted, continue
             continue;
+            }
         }
-
-        // If we reach here, the page is either clean or has been successfully written back to disk.
-        // Proceed to unmap the page from the process's page directory.
-
-        //call unmap_physical_page (should pass virtual address of the page here)
-
-        // Maybe clear any additional state associated with this page...
-
-        // Mark the page as free for future allocations.
-        // call mark_page_as_free(page number)
-        
-        //return (uint32_t*)vaddr; // Successfully evicted a page, return its address. Physical? Virtual?
-
     }
     // Couldn't find a suitable page to evict.
     return NULL;
