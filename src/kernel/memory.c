@@ -822,8 +822,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
 
-         uint32_t *new_table = allocate_page();
-         dir_ins_table(pcb->page_directory, vaddr, new_table, user_mode);
+         frameref_table = allocate_page();
+         dir_ins_table(pcb->page_directory, vaddr, frameref_table, user_mode);
     }
 
     success = scsi_read(disk_sector, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
@@ -831,6 +831,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
         pr_debug("Failed to read from disk sector %u\n", disk_sector);
         return success;
     }
+
+    table_map_page(frameref_table, vaddr, frameref, user_mode);
     // Calculate physical address from the frame reference ('frame' points to the beginning of the page frame).
     //uint32_t paddr = (uint32_t)frame; // Direct mapping???
     //update_page_table(vaddr, paddr, pcb->page_directory, PE_P | PE_RW | PE_US);
