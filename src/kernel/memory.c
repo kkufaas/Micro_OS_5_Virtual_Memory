@@ -32,8 +32,11 @@
 #define HASH_TABLE_SIZE 1024
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 #define KERNEL_SIZE 0x300000 // 3 MB in hexadecimal
-// A bitmap for tracking free pages, being initialized in init_memory
+
+// A bitmap for tracking free page frames, being initialized in init_memory
 uint32_t free_pages_bitmap[BITMAP_SIZE]; 
+
+
 static unsigned long next = 1; // Used in random function
 #define MEMDEBUG 1
 #define DEBUG_PAGEFAULT 1
@@ -54,6 +57,7 @@ enum {
 
 inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory);
+bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory);
  
 ///////////////////////////////////////////////////////
 // similar (but static) datastructure as in INF1101
@@ -86,14 +90,44 @@ struct page_frame_info {
 };
 typedef struct page_frame_info page_frame_info_t;
 
+// circular linked list of free pages
+/////////////////////////////////////////////////////////////////////////
+struct page_frame {
+    uint32_t address;
+    struct page_frame *next_free;
+};
+typedef struct page_frame page_frame_t;
+page_frame_t free_pages[PAGEABLE_PAGES];
+
+void initialize_free_pages() {
+    free_pages[0].address = PAGING_AREA_MIN_PADDR;
+    for (int i = 1; i < PAGEABLE_PAGES; i++) {
+        free_pages[i - 1].next_free = &free_pages[i];
+        free_pages[i].address = PAGING_AREA_MIN_PADDR + i*PAGE_SIZE;
+    }
+    free_pages[PAGEABLE_PAGES].next_free = &free_pages[0];
+}
+/////////////////////////////////////////////////////////////////////////
+
+
+page_frame_info_t page_frame_info[PAGEABLE_PAGES];
+page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
+
 int is_pinned(page_frame_info_t *frame_info)
 {
     return (frame_info -> info_mode) & PE_INFO_PINNED;
 }
 
 
-page_frame_info_t page_frame_info[PAGEABLE_PAGES];
-page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
+uintptr_t *find_free_page(void) {
+    page_frame_info_t *current_info_frame;
+    for (int i = 0; i < PAGEABLE_PAGES; i++) {
+        current_info_frame = &page_frame_info[i];
+        if (!current_info_frame -> owner) {
+            return current_info_frame -> paddr;
+        }
+    }
+}
 
 void initialize_page_frame_infos(void) {
     for (int i = 0; i < PAGEABLE_PAGES; i++) {
@@ -197,30 +231,12 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
 // }
 
 
-int trav_evict_vaddr_helper(uint32_t current_vaddr, uint32_t *current_page_dir) {
-    int dirty = 0;
-    uint32_t current_table_index = get_table_index(current_vaddr);
-    uint32_t *current_table = get_page_table(current_table_index, current_page_dir);
-
-    // check if dirty
-    dirty = current_table[current_table_index] & PE_D;
-
-    // reset dirtyness bit in table by anding with not(PE_D)
-    current_table[current_table_index] &= ~PE_D;
-
-    // set not present bit
-    current_table[current_table_index] &= ~PE_P;
-
-    return dirty;
-}
-
 /*
  * Processes all page tables with a reference to the physical address paddr.
  * Checks if the pages are dirty
  * Returns -1 if paddr must not be evicted
  * Returns 0 when not dirty
  * Returns 1 when dirty
- * 
  */
 int traverse_evict(uintptr_t *paddr) {
     int dirty = 0;
@@ -240,7 +256,7 @@ int traverse_evict(uintptr_t *paddr) {
         // process vaddr of info
         // check if dirty
         if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
-            dirty += trav_evict_vaddr_helper(current_vaddr, current_pdir);
+            dirty += is_page_dirty(current_vaddr, current_pdir);
         } else {
             // trying to evict kernel page dir
             // frame should be pinned and this should never happen!
@@ -253,12 +269,14 @@ int traverse_evict(uintptr_t *paddr) {
 }
 
 ////////////////////////////////////////////////////
-
 /*
  * Allocate contiguous bytes of memory aligned to a page boundary
  *
  * Note: if size < 4096 bytes, then 4096 bytes are used, beacuse the
  * memory blocks must be aligned to a page boundary.
+ * 
+ * TODO: update so that if next_free_mem is exhausted it will look for
+ * a page to evict.
  */
 uintptr_t alloc_memory(size_t bytes)
 {
@@ -578,6 +596,8 @@ void init_memory(void)
     // Initialize the bitmap to track free pages
     initialize_free_pages_bitmap();
 
+    initialize_page_frame_infos();
+
     next_free_mem = PAGING_AREA_MIN_PADDR;
     setup_kernel_vmem();
 
@@ -631,8 +651,8 @@ uint32_t select_page_for_eviction() {
 }
 
 // Checks if the given page is dirty by looking up its page table entry
-bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory) {
-    // Assuming `current_running` points to the currently running process control block (PCB)
+bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory)
+{
     uint32_t dir_index = get_directory_index(vaddr);
     uint32_t dir_entry = page_directory[dir_index];
     if (!(dir_entry & PE_P)) {
@@ -642,7 +662,7 @@ bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory) {
     uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
     uint32_t table_index = get_table_index(vaddr);
     uint32_t page_entry = page_table[table_index];
-    return (page_entry & PE_D) != 0;
+    return page_entry & PE_D;
 }
 
 
@@ -813,7 +833,6 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     }
     uint32_t disk_sector = disk_offset / SECTOR_SIZE;
     uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
-    uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
 
     if (frameref_table == NULL) {
          //pr_debug("Failed to allocate frame for virtual address 0x%08x\n", vaddr);
@@ -826,16 +845,22 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
          dir_ins_table(pcb->page_directory, vaddr, frameref_table, user_mode);
     }
 
+    // finds the physical address
+    // uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
+    uint32_t *frameref = allocate_page();
+
     success = scsi_read(disk_sector, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
     if (success != 0) {
         pr_debug("Failed to read from disk sector %u\n", disk_sector);
         return success;
     }
 
-    table_map_page(frameref_table, vaddr, frameref, user_mode);
-    // Calculate physical address from the frame reference ('frame' points to the beginning of the page frame).
-    //uint32_t paddr = (uint32_t)frame; // Direct mapping???
-    //update_page_table(vaddr, paddr, pcb->page_directory, PE_P | PE_RW | PE_US);
+    // check that frameref is not present before overwriting
+    if (*frameref & PE_P) {
+
+    }
+
+    table_map_page(frameref_table, vaddr, (uint32_t) frameref, user_mode);
     pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
     return success; 
 }
@@ -843,7 +868,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
-uint32_t* try_evict_page2() {
+uint32_t* try_evict_page() {
 
     int dirty;
     uintptr_t *frameref;
