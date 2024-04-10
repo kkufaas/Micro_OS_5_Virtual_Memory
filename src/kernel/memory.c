@@ -227,26 +227,18 @@ int traverse_evict(uintptr_t *paddr) {
 
     uint32_t info_index = calculate_info_index(paddr);
     page_frame_info_t *info = &page_frame_info[info_index];
+
+
     uint32_t *current_pdir= info -> owner -> page_directory;
     uint32_t current_vaddr = (uint32_t) info -> vaddr;
 
-    // process vaddr of info
-    // check if dirty
-    if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
-        dirty = trav_evict_vaddr_helper(current_vaddr, current_pdir);
-    } else {
-        // trying to evict kernel page dir
-        // frame should be pinned and this should never happen!
-        pr_error("Trying to evict kernel page directory \n");
-        return -1;
-    }
-
     while (info -> next_shared_info) {
         // process next_shared_info
-        info = info -> next_shared_info;
-        current_pdir= info -> owner -> page_directory;
-        current_vaddr = (uint32_t) info -> vaddr;
-
+        if (info -> owner == current_running) {
+            
+        }
+        // process vaddr of info
+        // check if dirty
         if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
             dirty += trav_evict_vaddr_helper(current_vaddr, current_pdir);
         } else {
@@ -785,79 +777,77 @@ uint32_t virtual_to_physical_address(uint32_t vaddr, uint32_t* page_directory) {
 }
 
 
-void write_page_back_to_disk(uint32_t vaddr) {
-    uint32_t *page_directory;
-    // if current_running is not NULL, we assume user mode and use its page directory.
-    // should current running ever be NULL?
-    if (current_running != NULL) {
-        page_directory = current_running->page_directory;
-    } else {
-        // Use the shared kernel page directory in kernel mode.
-        page_directory = kernel_pdir; 
+uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb)
+{
+    uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
+    if (disk_addr < pcb->swap_loc + pcb->swap_size) {
+        //error
+        pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
     }
+    return disk_addr;
+}
 
-    // Translate the virtual address to its corresponding physical address.
-    uint32_t paddr = virtual_to_physical_address(vaddr, page_directory);
+int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
 
     // Calculate the disk offset based on the physical address.
-    uint32_t disk_offset = calculate_disk_offset(paddr);
+    //uint32_t disk_offset = calculate_disk_offset(paddr);
+    int success = -1;
+    uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
+
+    if (disk_addr < pcb->swap_loc + pcb->swap_size) {
+        //error
+        pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
+        return success;
+    }
+
+    uint32_t disk_loc = disk_addr/SECTOR_SIZE;
+    uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
+    uint32_t *frameref = frameref_table[get_table_index(vaddr)];
+    success = scsi_write(disk_loc, PAGE_SIZE/SECTOR_SIZE, frameref);
 
     // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
-    clear_page_dirty_bit(vaddr, page_directory);
-    pr_debug("Page at virtual address 0x%08x written back to disk at offset 0x%08x\n", vaddr, disk_offset);
+    pr_debug("Page at virtual address 0x%08x written back to disk at address 0x%08x\n", vaddr, disk_addr);
+    return success; //success
+
+
 }
+
 
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
 uint32_t* try_evict_page() {
-    for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
-        uintptr_t *frameref = (uintptr_t *) select_page_for_eviction();
-        uint32_t info_index = calculate_info_index(frameref);
-        page_frame_info_t *frame_info = &page_frame_info[info_index];
 
-        if (!is_pinned(frame_info)) {
-            // traverse all the page dirs and page refs
+    int dirty;
+    uintptr_t *frameref;
+    uint32_t info_index;
+    page_frame_info_t *frame_info;
 
-        //if (is_page_dirty(page_number)) {
-        //         pr_debug("Write the page back to disk if it's dirty\n");
-        //         // Write the page back to disk if it's dirty
-        //         write_page_back_to_disk(vaddr);
-        //     }
-        //     // Unmap the page from the address space, marking it as not present
-        //     unmap_physical_page(page_number);
-        //     mark_page_as_free(page_number);
-        //     return (uint32_t*)vaddr; // Returning the virtual address so far, can be adjusted to physical
-        //
-        }
-    }
-    // Couldn't find a suitable page to evict.
-    return NULL;
-}
-
-// Attempts to find and evict a page
-// Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
-uint32_t* try_evict_page_v2() {
-    uint32_t *frameref, frameref_addr;
     uint32_t *base = (uint32_t *) PAGING_AREA_MIN_PADDR;
+
     for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
-        //uint32_t page_number = select_page_for_eviction();
-        frameref_addr = PAGING_AREA_MIN_PADDR + attempts*PAGE_SIZE;
+        dirty = 0;
+        frameref = (uintptr_t *) select_page_for_eviction();
+        info_index = calculate_info_index(frameref);
+        frame_info = &page_frame_info[info_index];
 
-        if( (frameref = paddr_to_frameref(frameref_addr)) ) {
-            // physical page present
-
-            // TODO: check if frameref is pinned
-            // ....
-            ///////////////////////////////
-        } else {
-            // physical page not present
+        if (frame_info -> info_mode & PE_INFO_PINNED) {
+            continue;
         }
-
+        dirty = traverse_evict(frameref);
+        if (dirty > 0) {
+            // write to disc
+        } else if (dirty == 0) {
+            // not dirty, nothing to do, everything handled by traverse_evict
+        } else {
+            // page must not be evicted, continue
+            continue;
+        }
     }
     // Couldn't find a suitable page to evict.
     return NULL;
 }
+
 
 
 
