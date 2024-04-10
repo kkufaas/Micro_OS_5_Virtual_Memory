@@ -618,23 +618,20 @@ bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory)
     return page_entry & PE_D;
 }
 
-// Not in use
-// void unmap_physical_page(uint32_t vaddr) {
-//     // Eindride 8/04-22: 
-//     // Changed kernel_pdir to current_running->page_directory
+void unmap_physical_page(uint32_t vaddr) {
+    // Eindride 8/04-22: 
+    // Changed kernel_pdir to current_running->page_directory
+    // Given mode 0 clears the PE_P bit
+    page_set_mode(current_running->page_directory, vaddr, 0); 
+}
 
-//     // Given mode 0 clears the PE_P bit
-//     page_set_mode(current_running->page_directory, vaddr, 0); 
-// }
-
-// Not in use
-// void mark_page_as_free(uint32_t page_number) {
-//     if (page_number < PAGEABLE_PAGES) {
-//         uint32_t index = page_number / BITS_PER_ENTRY;
-//         uint32_t bit = page_number % BITS_PER_ENTRY;
-//         free_pages_bitmap[index] |= (1 << bit);
-//     }
-// }
+void mark_page_as_free(uint32_t page_number) {
+    if (page_number < PAGEABLE_PAGES) {
+        uint32_t index = page_number / BITS_PER_ENTRY;
+        uint32_t bit = page_number % BITS_PER_ENTRY;
+        free_pages_bitmap[index] |= (1 << bit);
+    }
+}
 
 /*
  * Given a virtual address and a pointer to the page directory, it
@@ -845,12 +842,16 @@ uint32_t* try_evict_page() {
 
         // If we reach here, the page is either clean or has been successfully written back to disk.
         // Proceed to unmap the page from the process's page directory.
-        //call unmap_physical_page
+
+        //call unmap_physical_page (should pass virtual address of the page here)
+
         // Maybe clear any additional state associated with this page...
+
         // Mark the page as free for future allocations.
-        // call mark_page_as_free
-        //return (uint32_t*)vaddr; // Successfully evicted a page, return its address. Physical? Virtual?
+        // call mark_page_as_free(page number)
         
+        //return (uint32_t*)vaddr; // Successfully evicted a page, return its address. Physical? Virtual?
+
     }
     // Couldn't find a suitable page to evict.
     return NULL;
