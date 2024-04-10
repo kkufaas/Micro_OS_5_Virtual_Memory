@@ -48,7 +48,7 @@ static pcb_t dummy_kernel_pcb[1];
 
 enum {
     PE_INFO_USER_MODE              = 1 << 0,     /* user */
-    PE_INFO_KERNEL                 = 1 << 1,     /* kernel ''dummy'' */
+    PE_INFO_KERNEL_DUMMY           = 1 << 1,     /* kernel ''dummy'' */
     PE_INFO_PINNED                 = 1 << 2,     /* pinned */
 };
 
@@ -199,10 +199,12 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
 
 int trav_evict_vaddr_helper(uint32_t current_vaddr, uint32_t *current_page_dir) {
     int dirty = 0;
-    // check if dirty
     uint32_t current_table_index = get_table_index(current_vaddr);
     uint32_t *current_table = get_page_table(current_table_index, current_page_dir);
+
+    // check if dirty
     dirty = current_table[current_table_index] & PE_D;
+
     // reset dirtyness bit in table by anding with not(PE_D)
     current_table[current_table_index] &= ~PE_D;
 
@@ -215,7 +217,8 @@ int trav_evict_vaddr_helper(uint32_t current_vaddr, uint32_t *current_page_dir) 
 /*
  * Processes all page tables with a reference to the physical address paddr.
  * Checks if the pages are dirty
- * Returns  0 when not dirty
+ * Returns -1 if paddr must not be evicted
+ * Returns 0 when not dirty
  * Returns 1 when dirty
  * 
  */
@@ -228,18 +231,32 @@ int traverse_evict(uintptr_t *paddr) {
     uint32_t current_vaddr = (uint32_t) info -> vaddr;
 
     // process vaddr of info
-
     // check if dirty
-    dirty = trav_evict_vaddr_helper(current_vaddr, current_pdir);
+    if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
+        dirty = trav_evict_vaddr_helper(current_vaddr, current_pdir);
+    } else {
+        // trying to evict kernel page dir
+        // frame should be pinned and this should never happen!
+        pr_error("Trying to evict kernel page directory \n");
+        return -1;
+    }
+
     while (info -> next_shared_info) {
         // process next_shared_info
         info = info -> next_shared_info;
         current_pdir= info -> owner -> page_directory;
         current_vaddr = (uint32_t) info -> vaddr;
-        dirty += trav_evict_vaddr_helper(current_vaddr, current_pdir);
+
+        if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
+            dirty += trav_evict_vaddr_helper(current_vaddr, current_pdir);
+        } else {
+            // trying to evict kernel page dir
+            // frame should be pinned and this should never happen!
+            pr_error("Trying to evict kernel page directory \n");
+            return -1;
+        }
     }
     //page_set_mode
-
     return dirty;
 }
 
@@ -476,7 +493,7 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
 
 static void setup_kernel_vmem(void) {
     dummy_kernel_pcb -> is_thread = 1;
-    uint32_t info_mode = PE_INFO_PINNED | PE_INFO_KERNEL;
+    uint32_t info_mode = PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY;
     lock_acquire(&page_map_lock);
     kernel_pdir = allocate_page();
     insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
