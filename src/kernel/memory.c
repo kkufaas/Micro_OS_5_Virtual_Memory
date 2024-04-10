@@ -855,15 +855,15 @@ uint32_t* try_evict_page() {
             int dirty = traverse_evict(frame_info->paddr);
                 if (dirty > 0) {
                 // The page is dirty, write it back to disk
-                write_page_back_to_disk(*frame_info->vaddr, frame_info->owner);
+                write_page_back_to_disk((uint32_t)frame_info->vaddr, frame_info->owner);
                 // Proceed to unmap the page
-                unmap_physical_page(*frame_info->vaddr);
+                unmap_physical_page((uint32_t)frame_info->vaddr);
                 add_page_frame_to_free_list((uint32_t)frame_info->paddr);
                 return frame_info->vaddr; // Return the virtual address of the evicted page
 
         } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
-                unmap_physical_page(*frame_info->vaddr);
+                unmap_physical_page((uint32_t)frame_info->vaddr);
                 add_page_frame_to_free_list((uint32_t)frame_info->paddr);
                 return frame_info->vaddr;
         } else {
