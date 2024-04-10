@@ -788,23 +788,17 @@ uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb)
 }
 
 int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
-
     // Calculate the disk offset based on the physical address.
-    //uint32_t disk_offset = calculate_disk_offset(paddr);
     int success = -1;
     uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
-
     if (disk_addr < pcb->swap_loc + pcb->swap_size) {
-        //error
         pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
         return success;
     }
-
     uint32_t disk_loc = disk_addr/SECTOR_SIZE;
     uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
     uint32_t *frameref = frameref_table[get_table_index(vaddr)];
     success = scsi_write(disk_loc, PAGE_SIZE/SECTOR_SIZE, frameref);
-
     // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
     pr_debug("Page at virtual address 0x%08x written back to disk at address 0x%08x\n", vaddr, disk_addr);
     return success; //success
@@ -813,7 +807,29 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
 }
 
 int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
-
+    int success = -1;
+    uint32_t disk_offset = (vaddr - PAGING_AREA_MIN_PADDR) + pcb->swap_loc; // in bytes
+    if (disk_offset >= pcb->swap_loc + pcb->swap_size) {
+        pr_debug("Disk address is outside the swap area of process %u\n", pcb->pid);
+        return success; 
+    }
+    uint32_t disk_sector = disk_offset / SECTOR_SIZE;
+    /int32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
+    uint32_t *frameref = frameref_table[get_table_index(vaddr)];
+    // if (frameref == NULL) {
+    //     pr_debug("Failed to allocate frame for virtual address 0x%08x\n", vaddr);
+    //     return success;
+    // }
+    success = scsi_read(disk_sector, PAGE_SIZE / SECTOR_SIZE, frameref);
+    if (success != 0) {
+        pr_debug("Failed to read from disk sector %u\n", disk_sector);
+        return success;
+    }
+    // Calculate physical address from the frame reference ('frame' points to the beginning of the page frame).
+    //uint32_t paddr = (uint32_t)frame; // Direct mapping???
+    //update_page_table(vaddr, paddr, pcb->page_directory, PE_P | PE_RW | PE_US);
+    pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, paddr);
+    return success; 
 }
 
 
