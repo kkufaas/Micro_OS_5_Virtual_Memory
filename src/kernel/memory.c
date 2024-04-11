@@ -586,12 +586,11 @@ void setup_process_vmem(pcb_t *p) {
     // uint32_t *proc_ptable = allocate_page();
     page_frame_info_t *proc_ptable_info = page_alloc();
     uint32_t *proc_ptable = proc_ptable_info -> paddr;
-    insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
-    insert_page_frame_info(proc_pdir, proc_pdir,p, PE_INFO_PINNED);
 
-    // Map it into the second entry of the page directory
-    // set as present since it is a page table.
+    insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
+    insert_page_frame_info(proc_pdir, proc_pdir, p, PE_INFO_PINNED);
     dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode | PE_P);
+
 
     /*
      * Map in the process image.
@@ -601,8 +600,12 @@ void setup_process_vmem(pcb_t *p) {
      * stack size must be subtracted from p->swap_size in the loop conditional
      */
     uint32_t paddr, vaddr, offset;
-    for (offset = 0; offset < p->swap_size; offset += PAGE_SIZE) {
-        paddr = p->swap_loc + offset; // page not present - anything works
+    uint32_t upper_lim = (p -> swap_size)*SECTOR_SIZE/PAGE_SIZE;
+    for (offset = 0; offset < upper_lim; offset += PAGE_SIZE) {
+        paddr = p->swap_loc*SECTOR_SIZE + offset;     // set as present since it is a page table.
+
+        // page not present - anything works
+        dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode);
         vaddr = PROCESS_VADDR + offset;
         table_map_page(proc_ptable, vaddr, paddr, user_mode);
     }
@@ -617,9 +620,11 @@ void setup_process_vmem(pcb_t *p) {
         page_frame_info_t *stack_page_info = page_alloc();
         stack_page = stack_page_info -> paddr;
         insert_page_frame_info(stack_page, (uintptr_t *) stack_vaddr, p, PE_INFO_PINNED | PE_INFO_USER_MODE);
+        pr_debug("allocated a stack frame with vaddr=%x at paddr %x, proceeding to map \n", (uint32_t) stack_vaddr, (uint32_t) stack_page);
         // map the stack virtual address to the proc_ptable
         table_map_page(proc_ptable, stack_vaddr,  (uint32_t) stack_page, user_mode | PE_P);
     }
+
 
     // Update the process control block
     p->page_directory = proc_pdir;
@@ -823,14 +828,32 @@ uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb, int *error)
 }
 
 int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
+
+    /* 
+     * pcb-> swap_loc is sector number on disk, pcb -> swap_size is number of sectors.
+     */
+
     // Calculate the disk offset based on the physical address.
     int success = -1;
-    uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
-    if (disk_addr < pcb->swap_loc + pcb->swap_size) {
-        pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
+
+    uint32_t disk_offset = (vaddr - PROCESS_VADDR) / PAGE_SIZE;
+    disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
+
+    if (disk_offset > pcb -> swap_size) {
+        pr_error("too large virtual address for the swap image for pid %u\n", pcb->pid);
         return success;
     }
-    uint32_t disk_loc = disk_addr/SECTOR_SIZE;
+
+    uint32_t disk_loc = pcb -> swap_loc + disk_offset;
+
+    //if ( disk_offset > (pcb->swap_loc*SECTOR_SIZE + pcb->swap_size)) {
+    //    pr_debug("Disk address is outside the swap area of process %u\n", pcb->pid);
+    //    pr_debug("Swap area: pcb->swap_loc*SECTOR_SIZE = %u,     pcb->swap_size = %u \n", pcb->swap_loc*SECTOR_SIZE, pcb->swap_size);
+    //    pr_debug("Swap area: pcb->swap_loc = %u\n", pcb->swap_loc);
+    //    return success; 
+    //}
+
+    //uint32_t disk_loc = disk_offset/SECTOR_SIZE;
 
     uint32_t *frameref_table;
     if (! (frameref_table = get_page_table(vaddr, pcb->page_directory)) ) {
@@ -853,22 +876,48 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
 
 
     uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
+
     success = scsi_write(disk_loc, PAGE_SIZE/SECTOR_SIZE, (void *) frameref);
+
     // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
-    pr_debug("Page at virtual address 0x%08x written back to disk at address 0x%08x\n", vaddr, disk_addr);
+    pr_debug("Page at virtual address 0x%08x written back to disk at address 0x%08x\n", vaddr, disk_offset);
     return success; //success
 }
 
 int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
-    uint32_t user_mode = PE_US | PE_RW;
+
+    /* 
+     * pcb-> swap_loc is sector number on disk, pcb -> swap_size is number of sectors.
+     */
+
+
     int success = -1;
-    uint32_t disk_offset = (vaddr - PAGING_AREA_MIN_PADDR) + pcb->swap_loc; // in bytes
-    if ( disk_offset > (pcb->swap_loc + pcb->swap_size) ) {
-        pr_debug("Disk address is outside the swap area of process %u\n", pcb->pid);
-        return success; 
+
+    uint32_t disk_offset = (vaddr - PROCESS_VADDR) / PAGE_SIZE;
+    disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
+
+    if (disk_offset > pcb -> swap_size) {
+        pr_error("too large virtual address for the swap image for pid %u\n", pcb->pid);
+        pr_debug("disk_offset %u \n", disk_offset);
+        pr_debug("vaddr:  %x \n", vaddr);
+        return success;
     }
 
-    uint32_t disk_sector = disk_offset / SECTOR_SIZE;
+    uint32_t disk_loc = pcb -> swap_loc + disk_offset;
+
+    //uint32_t disk_sector = disk_offset / SECTOR_SIZE;
+
+
+    uint32_t info_mode;
+    uint32_t mode = PE_P | PE_RW;
+    if (pcb -> is_thread) {
+        info_mode = PE_INFO_PINNED;
+    } else {
+        info_mode = PE_INFO_USER_MODE;
+        mode |= PE_US;
+    }
+
+
     uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
     if (frameref_table == NULL) {
          //pr_debug("Failed to allocate frame for virtual address 0x%08x\n", vaddr);
@@ -878,15 +927,6 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
          page_frame_info_t *frameref_table_info = page_alloc();
          frameref_table = frameref_table_info -> paddr;
 
-        int info_mode;
-        int mode; 
-        if (pcb -> is_thread) {
-            info_mode = PE_INFO_PINNED;
-            mode = PE_P | PE_RW;
-        } else {
-            info_mode = PE_INFO_USER_MODE;
-            mode = PE_P | PE_RW | PE_US;
-        }
 
         insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
         dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
@@ -894,24 +934,20 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 
     // tries to allocate a page if available and evicts a page if not
     page_frame_info_t *frameref_info = page_alloc();
-    if (frameref_info == NULL) {
+    while (frameref_info == NULL) {
         uint32_t *evicted_page = try_evict_page();
         frameref_info = &page_frame_info[calculate_info_index(evicted_page)];
     }
 
     uint32_t *frameref = frameref_info -> paddr;
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
-
-    success = scsi_read(disk_sector, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
+    success = scsi_read(disk_loc, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
     if (success != 0) {
-        pr_debug("Failed to read from disk sector %u\n", disk_sector);
+        pr_debug("Failed to read from disk sector %u\n", disk_loc);
         return success;
     }
-    // check that frameref is not present before overwriting
-    if (*frameref & PE_P) {
-       // ???
-    }
-    table_map_page(frameref_table, vaddr, (uint32_t) frameref, user_mode);
+
+    table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
     return success; 
 }
@@ -1019,19 +1055,14 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             //pr_debug("total page not present page faults: %u \n", total_page_fault_page_not_present_counter);
         }
 
-        int error;
         uint32_t fault_address = load_page_fault_addr();
-        uint32_t disk_address = vaddr_to_disk_addr(fault_address, current_running, &error);
-
-        if (error) {
-            pr_error("error occured; disk address %u out of bounds of paging area\n", disk_address);
-        }
 
         page_frame_info_t *new_page_info = page_alloc();
         uintptr_t *new_page = new_page_info -> paddr;
         insert_page_frame_info(new_page, (uintptr_t *) fault_address, current_running, PE_INFO_USER_MODE);
 
         if ( load_page_from_disk(fault_address, current_running) >= 0) {
+            pr_debug("loaded page from disk into memory\n");
             set_page_directory(current_running -> page_directory);
             nointerrupt_enter();
             return;
