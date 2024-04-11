@@ -130,9 +130,9 @@ void initialize_page_frame_infos(void) {
  * and
  * spinlock_release(&page_frame_info_lock);
  */
-void add_page_frame_to_free_list_info(uint32_t paddress) {
+void add_page_frame_to_free_list_info(uintptr_t *paddress) {
     // Convert 'address' to its corresponding index in the free_pages array
-    int index = (paddress - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
+    int index = ((uint32_t) paddress - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
     page_frame_info_t* page_frame = &page_frame_info[index];
     // Prepend this page_frame to the start of the free list
     page_frame_info->next_free_page = page_free_head;
@@ -352,14 +352,14 @@ void page_free(uintptr_t *paddr) {
     do {
         info_frame -> owner = NULL;
         info_frame -> vaddr = NULL;
-        uint32_t info_mode = 0;
+        info_frame -> info_mode = 0;
 
         // transfer to next shared info frame
         next_shared_info = info_frame -> next_shared_info;
         info_frame -> next_shared_info = NULL;
         info_frame = next_shared_info;
     }
-    while (info_frame)
+    while (info_frame);
 }
 
 
@@ -509,7 +509,10 @@ static uint32_t *kernel_pdir;
 static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
     uint32_t kernel_mode = PE_P | PE_RW; // Define access mode for kernel pages.
-    uint32_t *kernel_ptable = allocate_page();
+
+    page_frame_info_t *kernel_info_page = page_alloc();
+    uint32_t *kernel_ptable = kernel_info_page -> paddr;
+    //uint32_t *kernel_ptable = allocate_page();
     // Allocate and "pin" the page table to ensure it's not swapped out.
     // uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
     insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb,1);
@@ -901,14 +904,14 @@ uint32_t* try_evict_page() {
                 unmap_physical_page((uint32_t)frame_info->vaddr);
 
                 spinlock_acquire(&page_frame_info_lock);
-                add_page_frame_to_free_list_info((uint32_t)frame_info->paddr);
+                add_page_frame_to_free_list_info(frame_info->paddr);
                 spinlock_release(&page_frame_info_lock);
 
                 return frame_info->vaddr; 
             } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
                 unmap_physical_page((uint32_t)frame_info->vaddr);
-                add_page_frame_to_free_list_info((uint32_t)frame_info->paddr);
+                add_page_frame_to_free_list_info(frame_info->paddr);
                 return frame_info->vaddr;
             } else {
             // page must not be evicted, continue
