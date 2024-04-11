@@ -55,6 +55,7 @@ static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory);
 bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory);
+uint32_t* try_evict_page();
  
 ///////////////////////////////////////////////////////
 // similar (but static) datastructure as in INF1101
@@ -330,11 +331,12 @@ page_frame_info_t* page_alloc()
     spinlock_release(&page_frame_info_lock);
 
     // zero out the page
-    uintptr_t *paddr = page_info_frame -> paddr;
-    for (int i = 0; i < PAGE_SIZE; i++) {
-        *(paddr + i) = 0;
+    if (page_info_frame) {
+        uintptr_t *paddr = page_info_frame -> paddr;
+        for (int i = 0; i < PAGE_SIZE; i++) {
+            *(paddr + i) = 0;
+        }
     }
-
     return page_info_frame;
 }
 
@@ -506,6 +508,9 @@ uint32_t* allocate_page(void) {
 static uint32_t *kernel_pdir;
 
 
+/*
+ * Sets up 
+*/
 static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
     uint32_t kernel_mode = PE_P | PE_RW; // Define access mode for kernel pages.
@@ -515,7 +520,7 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     //uint32_t *kernel_ptable = allocate_page();
     // Allocate and "pin" the page table to ensure it's not swapped out.
     // uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
-    insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb,1);
+    insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb, PE_INFO_PINNED);
     /* Set the appropriate access flag (user or kernel) for the video buffer page at 0xb8000.
      * Identity maps the video memory from 0xb8000-0xb8fff for direct access.
      */
@@ -544,7 +549,9 @@ static void setup_kernel_vmem(void) {
     dummy_kernel_pcb -> is_thread = 1;
     uint32_t info_mode = PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY;
     lock_acquire(&page_map_lock);
-    kernel_pdir = allocate_page();
+    //kernel_pdir = allocate_page();
+    page_frame_info_t *kernel_pdir_info = page_alloc();
+    kernel_pdir = kernel_pdir_info -> paddr;
     insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
     setup_kernel_vmem_common(kernel_pdir, 0);
     lock_release(&page_map_lock);
@@ -555,7 +562,9 @@ static void setup_kernel_vmem(void) {
  */
 void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
-    uint32_t *proc_pdir = allocate_page();
+    page_frame_info_t *proc_pdir_info = page_alloc();
+    uint32_t *proc_pdir = proc_pdir_info -> paddr;
+    //uint32_t *proc_pdir = allocate_page();
     uint32_t user_mode = PE_RW | PE_US;
 
     // basically same as P4-precode
@@ -574,7 +583,9 @@ void setup_process_vmem(pcb_t *p) {
     }
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
-    uint32_t *proc_ptable = allocate_page();
+    // uint32_t *proc_ptable = allocate_page();
+    page_frame_info_t *proc_ptable_info = page_alloc();
+    uint32_t *proc_ptable = proc_ptable_info -> paddr;
     insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
     insert_page_frame_info(proc_pdir, proc_pdir,p, PE_INFO_PINNED);
 
@@ -602,7 +613,10 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t stack_lim = PROCESS_STACK_VADDR - USER_STACK_SIZE;
     uint32_t stack_base = PROCESS_STACK_VADDR;
     for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
-        stack_page = allocate_page();
+        //stack_page = allocate_page();
+        page_frame_info_t *stack_page_info = page_alloc();
+        stack_page = stack_page_info -> paddr;
+        insert_page_frame_info(stack_page, (uintptr_t *) stack_vaddr, p, PE_INFO_PINNED | PE_INFO_USER_MODE);
         // map the stack virtual address to the proc_ptable
         table_map_page(proc_ptable, stack_vaddr,  (uint32_t) stack_page, user_mode | PE_P);
     }
@@ -634,28 +648,6 @@ void init_memory(void)
 
 /* === Exception handlers === */
 
-/*
- * Comment author: Eindride Kjersheim
- * Error code bits, from Intel i386 manual page 170.
- * https://css.csail.mit.edu/6.858/2014/readings/i386.pdf
- * 
- *                                 2       1       0
- *  ____________________________ ______________________
- * |            29 bits         |  U/S    W/R     V/P  | 
- * |___________undefined________|______________________|
- * 
- *  Error code is the last 3 bits masked as error_code & 0x7, recall 0x7 = 0b111
- *  
- * U/S bit: 1 when processor was executing in user mode, 0 when in supervisor mode
- * W/R bit: 1 for write, 0 for read
- * P/V bit: 1 for page-level protection violation, 0 for page not present
- */ 
-
-
-#define ec_privilige_level(error_code) (error_code) & 0x4 >> 2
-#define ec_write(error_code) (error_code) & 0x2 >> 1
-#define ec_page_not_present(error_code) !((error_code) & 0x1)
-#define ec_privilige_violation(error_code) (error_code) & 0x1
 
 /* === Page Fault Handler Helper Functions === */
 
@@ -818,16 +810,17 @@ uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory)
 //     return physical_page_start + page_offset;
 // }
 
-// Not in use
-// uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb)
-// {
-//     uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
-//     if (disk_addr < pcb->swap_loc + pcb->swap_size) {
-//         //error
-//         pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
-//     }
-//     return disk_addr;
-// }
+uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb, int *error)
+{
+    *error = 0;
+    uint32_t disk_addr = (vaddr - PAGING_AREA_MIN_PADDR) + pcb -> swap_loc; // in bytes
+    if (disk_addr < pcb->swap_loc + pcb->swap_size) {
+        //error
+        *error = 1;
+        pr_debug("disk address too large, outside swap area of process %u\n", pcb -> pid);
+    }
+    return disk_addr;
+}
 
 int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
     // Calculate the disk offset based on the physical address.
@@ -838,7 +831,27 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
         return success;
     }
     uint32_t disk_loc = disk_addr/SECTOR_SIZE;
-    uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
+
+    uint32_t *frameref_table;
+    if (! (frameref_table = get_page_table(vaddr, pcb->page_directory)) ) {
+        // allocate new table
+        page_frame_info_t *frameref_table_info = page_alloc();
+        frameref_table = frameref_table_info -> paddr;
+
+        int info_mode;
+        int mode; 
+        if (pcb -> is_thread) {
+            info_mode = PE_INFO_PINNED;
+            mode = PE_P | PE_RW;
+        } else {
+            info_mode = PE_INFO_USER_MODE;
+            mode = PE_P | PE_RW | PE_US;
+        }
+        insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
+        dir_ins_table(pcb -> page_directory, vaddr, frameref_table, mode);
+    } 
+
+
     uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
     success = scsi_write(disk_loc, PAGE_SIZE/SECTOR_SIZE, (void *) frameref);
     // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
@@ -847,13 +860,14 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
 }
 
 int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
-    uint32_t user_mode = PE_US;
+    uint32_t user_mode = PE_US | PE_RW;
     int success = -1;
     uint32_t disk_offset = (vaddr - PAGING_AREA_MIN_PADDR) + pcb->swap_loc; // in bytes
-    if (disk_offset >= pcb->swap_loc + pcb->swap_size) {
+    if ( disk_offset > (pcb->swap_loc + pcb->swap_size) ) {
         pr_debug("Disk address is outside the swap area of process %u\n", pcb->pid);
         return success; 
     }
+
     uint32_t disk_sector = disk_offset / SECTOR_SIZE;
     uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
     if (frameref_table == NULL) {
@@ -861,12 +875,33 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
          //return success;
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
-         frameref_table = allocate_page();
-         dir_ins_table(pcb->page_directory, vaddr, frameref_table, user_mode);
+         page_frame_info_t *frameref_table_info = page_alloc();
+         frameref_table = frameref_table_info -> paddr;
+
+        int info_mode;
+        int mode; 
+        if (pcb -> is_thread) {
+            info_mode = PE_INFO_PINNED;
+            mode = PE_P | PE_RW;
+        } else {
+            info_mode = PE_INFO_USER_MODE;
+            mode = PE_P | PE_RW | PE_US;
+        }
+
+        insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
+        dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
     }
-    // finds the physical address
-    // uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
-    uint32_t *frameref = allocate_page();
+
+    // tries to allocate a page if available and evicts a page if not
+    page_frame_info_t *frameref_info = page_alloc();
+    if (frameref_info == NULL) {
+        uint32_t *evicted_page = try_evict_page();
+        frameref_info = &page_frame_info[calculate_info_index(evicted_page)];
+    }
+
+    uint32_t *frameref = frameref_info -> paddr;
+    insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
+
     success = scsi_read(disk_sector, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
     if (success != 0) {
         pr_debug("Failed to read from disk sector %u\n", disk_sector);
@@ -884,7 +919,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
-uint32_t* try_evict_page() {
+uint32_t* try_evict_page()
+{
     uintptr_t *frameref;
     uint32_t info_index;
     page_frame_info_t *frame_info;
@@ -924,7 +960,31 @@ uint32_t* try_evict_page() {
 }
 
 
+/*
+ * Comment author: Eindride Kjersheim
+ * Error code bits, from Intel i386 manual page 170.
+ * https://css.csail.mit.edu/6.858/2014/readings/i386.pdf
+ * 
+ *                                 2       1       0
+ *  ____________________________ ______________________
+ * |            29 bits         |  U/S    W/R     V/P  | 
+ * |___________undefined________|______________________|
+ * 
+ *  Error code is the last 3 bits masked as error_code & 0x7, recall 0x7 = 0b111
+ *  
+ * U/S bit: 1 when processor was executing in user mode, 0 when in supervisor mode
+ * W/R bit: 1 for write, 0 for read
+ * P/V bit: 1 for page-level protection violation, 0 for page not present
+ */ 
 
+
+#define ec_privilige_level(error_code) (error_code) & 0x4 >> 2
+#define ec_write(error_code) (error_code) & 0x2 >> 1
+#define ec_page_not_present(error_code) !((error_code) & 0x1)
+#define ec_privilige_violation(error_code) (error_code) & 0x1
+
+// uint32_t total_page_fault_counter = 0;
+// uint32_t total_page_fault_page_not_present_counter = 0;
 
 /*
  * Handle page fault
@@ -932,6 +992,7 @@ uint32_t* try_evict_page() {
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
     nointerrupt_leave();
+    //total_page_fault_counter++;
     if (MEMDEBUG) {
         print_pcb_table();
         pr_debug("error code: %u \n", error_code & 0x7);
@@ -944,19 +1005,38 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
     if (ec_privilige_violation(error_code)) {
         // abort - access violation
         pr_error("page fault: access violation");
+        pr_debug("error code: %0x \n", error_code);
         abortk();
     } else {
+        //total_page_fault_page_not_present_counter++;
         // page not present
 
         if (DEBUG_PAGEFAULT) {
             pr_debug("page fault: page not present \n");
             pr_debug("page fault: privlige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
             pr_debug("page fault: read/write operation (W=1, R=0) %u\n", ec_write(error_code));
+            //pr_debug("total page faults: %u \n", total_page_fault_counter);
+            //pr_debug("total page not present page faults: %u \n", total_page_fault_page_not_present_counter);
         }
 
-        // different handling of read/writes?
+        int error;
+        uint32_t fault_address = load_page_fault_addr();
+        uint32_t disk_address = vaddr_to_disk_addr(fault_address, current_running, &error);
 
-        // what to do with privilige levels - simply info for what mode to set on pages?
+        if (error) {
+            pr_error("error occured; disk address %u out of bounds of paging area\n", disk_address);
+        }
+
+        page_frame_info_t *new_page_info = page_alloc();
+        uintptr_t *new_page = new_page_info -> paddr;
+        insert_page_frame_info(new_page, (uintptr_t *) fault_address, current_running, PE_INFO_USER_MODE);
+
+        if ( load_page_from_disk(fault_address, current_running) >= 0) {
+            set_page_directory(current_running -> page_directory);
+            nointerrupt_enter();
+            return;
+        }
+
     }
 
     todo_use(stack_frame);
