@@ -49,6 +49,7 @@ enum {
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
 
+static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 
 
 inline uint32_t get_table_index(uint32_t vaddr);
@@ -80,7 +81,16 @@ bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory);
 
 struct page_frame_info {
     pcb_t *owner;
-    struct page_frame_info *next_shared_info; // the next info frame like this
+
+    // the next info frame like this sharing the same physical address
+    struct page_frame_info *next_shared_info; 
+
+    // if not taken - points to the next free page
+    // if taken - is null.
+    // free a page? index by physical address and insert into
+    // into the linked list
+    struct page_frame_info *next_free_page;
+
     uintptr_t *paddr;
     uintptr_t *vaddr;
     uint32_t info_mode;
@@ -90,54 +100,63 @@ typedef struct page_frame_info page_frame_info_t;
 page_frame_info_t page_frame_info[PAGEABLE_PAGES];
 page_frame_info_t page_frame_info_shared[PAGEABLE_PAGES];
 
-/* === Circular linked list of free pages === */
+page_frame_info_t *page_free_head;
 
-struct page_frame {
-    uint32_t address;
-    struct page_frame *next_free;
-};
-typedef struct page_frame page_frame_t;
-page_frame_t free_pages[PAGEABLE_PAGES];
-page_frame_t* free_pages_head = &free_pages[0];
+#define set_frame_info(frame, ownerv, next_shared_infov, paddrv, vaddrv, info_modev) {\
+    frame.owner = ownerv;\
+    frame.next_shared_info = next_shared_infov;\
+    frame.paddr = paddrv;\
+    frame.info_mode = info_modev;\
+}
+void initialize_page_frame_infos(void) {
+    uint32_t paddr = PAGING_AREA_MIN_PADDR;
 
-// void initialize_free_pages() {
-//     free_pages[0].address = PAGING_AREA_MIN_PADDR;
-//     for (int i = 1; i < PAGEABLE_PAGES; i++) {
-//         free_pages[i - 1].next_free = &free_pages[i];
-//         free_pages[i].address = PAGING_AREA_MIN_PADDR + i*PAGE_SIZE;
-//     }
-//     free_pages[PAGEABLE_PAGES].next_free = &free_pages[0];
-// }
+    page_free_head = &page_frame_info[0];
+    set_frame_info(page_frame_info[0], NULL, NULL, (uintptr_t *) paddr, NULL, 0);
+    set_frame_info(page_frame_info_shared[0], NULL, NULL, NULL, NULL, 0);
 
-
-//Non-circular version
-void initialize_free_pages() {
-    free_pages[0].address = PAGING_AREA_MIN_PADDR;
     for (int i = 1; i < PAGEABLE_PAGES - 1; i++) {
-        free_pages[i - 1].next_free = &free_pages[i];
-        free_pages[i].address = PAGING_AREA_MIN_PADDR + i*PAGE_SIZE;
+        paddr += PAGE_SIZE;
+        set_frame_info(page_frame_info[i], NULL, NULL, (uintptr_t *) (paddr), NULL, 0);
+        set_frame_info(page_frame_info_shared[i], NULL, NULL, NULL, NULL, 0);
+
+        page_frame_info[i - 1].next_free_page = &page_frame_info[i];
     }
-    free_pages[PAGEABLE_PAGES - 1].next_free = NULL;
 }
 
-void add_page_frame_to_free_list(uint32_t address) {
+/*
+ * It is the responisibility of the caller to wrap this function between
+ * spinlock_acquire(&page_frame_info_lock);
+ * and
+ * spinlock_release(&page_frame_info_lock);
+ */
+void add_page_frame_to_free_list_info(uint32_t paddress) {
     // Convert 'address' to its corresponding index in the free_pages array
-    int index = (address - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
-    page_frame_t* page_frame = &free_pages[index];
+    int index = (paddress - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
+    page_frame_info_t* page_frame = &page_frame_info[index];
     // Prepend this page_frame to the start of the free list
-    page_frame->next_free = free_pages_head;
-    free_pages_head = page_frame;
+    page_frame_info->next_free_page = page_free_head;
+    page_free_head = page_frame;
 }
 
-page_frame_t* remove_page_frame_from_free_list() {
-    if (free_pages_head == NULL) {
+/*
+ * It is the responisibility of the caller to wrap this function between
+ * spinlock_acquire(&page_frame_info_lock);
+ * and
+ * spinlock_release(&page_frame_info_lock);
+ */
+page_frame_info_t* remove_page_frame_from_free_list_info() {
+    if (page_free_head == NULL) {
         // No free page frames available
         return NULL;
     }
     // Take the first page frame from the free list
-    page_frame_t* allocated_page_frame = free_pages_head;
-    free_pages_head = allocated_page_frame->next_free; // Move head to the next frame
-    allocated_page_frame->next_free = NULL; // Clear the next pointer
+    page_frame_info_t* allocated_page_frame = page_free_head;
+
+    // Move head to the next frame
+    page_free_head = allocated_page_frame->next_free_page; 
+
+    allocated_page_frame->next_free_page = NULL; 
     return allocated_page_frame;
 }
 
@@ -148,32 +167,6 @@ page_frame_t* remove_page_frame_from_free_list() {
 //     return (frame_info -> info_mode) & PE_INFO_PINNED;
 // }
 
-//Not in use
-// uintptr_t *find_free_page(void) {
-//     page_frame_info_t *current_info_frame;
-//     for (int i = 0; i < PAGEABLE_PAGES; i++) {
-//         current_info_frame = &page_frame_info[i];
-//         if (!current_info_frame -> owner) {
-//             return current_info_frame -> paddr;
-//         }
-//     }
-// }
-
-void initialize_page_frame_infos(void) {
-    for (int i = 0; i < PAGEABLE_PAGES; i++) {
-        page_frame_info[i].owner = NULL;
-        page_frame_info[i].next_shared_info = NULL;
-        page_frame_info[i].paddr = NULL;
-        page_frame_info[i].vaddr = NULL;
-        page_frame_info[i].info_mode = 0;
-
-        page_frame_info_shared[i].owner = NULL;
-        page_frame_info_shared[i].next_shared_info = NULL;
-        page_frame_info_shared[i].paddr = NULL;
-        page_frame_info_shared[i].vaddr = NULL;
-        page_frame_info_shared[i].info_mode = 0;
-    }
-}
 
 /*
  * "Hashing" function carrying physical page addresses into the info struct array 
@@ -185,8 +178,7 @@ uint32_t calculate_info_index(uintptr_t *paddr)
 
 
 /*
- * Returns and index into the inserted info struct
- * 
+ * ..
 */
 page_frame_info_t*
 insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr, 
@@ -194,6 +186,9 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
 {
     uint32_t index = calculate_info_index(paddr);
     if (page_frame_info[index].owner) {
+
+        pr_debug("shared page at physical address %u, already occupided by %u", 
+                        (uint32_t) paddr, page_frame_info[index].owner -> pid);
         page_frame_info_t *next_info = &page_frame_info[index];
         
         page_frame_info_t *final_info = next_info;
@@ -230,16 +225,18 @@ insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
             return NULL;
         }
     } else {
+        // page not occupied / page not shared
         page_frame_info_t *new_info = &page_frame_info[index];
         new_info->owner = owner_pcb;
         new_info->next_shared_info = NULL;
-        new_info->paddr = paddr;
         new_info->vaddr = vaddr;
         new_info->info_mode = info_mode;
         return new_info;
     }
-
 }
+
+
+
 
 // Not in use
 /*
@@ -321,6 +318,50 @@ uintptr_t alloc_memory(size_t bytes)
     assertf(next_free_copy < PAGING_AREA_MAX_PADDR, "Memory exhausted!");
     return ptr;
 }
+
+/* 
+ *  Allocates a page of memory by removing a page_info_frame from the list
+ *  of free pages and returning a pointer of it to the user.
+ */
+page_frame_info_t* page_alloc()
+{
+    spinlock_acquire(&page_frame_info_lock);
+    page_frame_info_t* page_info_frame = remove_page_frame_from_free_list_info();
+    spinlock_release(&page_frame_info_lock);
+
+    // zero out the page
+    uintptr_t *paddr = page_info_frame -> paddr;
+    for (int i = 0; i < PAGE_SIZE; i++) {
+        *(paddr + i) = 0;
+    }
+
+    return page_info_frame;
+}
+
+void page_free(uintptr_t *paddr) {
+    page_frame_info_t *info_frame, *next_shared_info;
+
+    spinlock_acquire(&page_frame_info_lock);
+    add_page_frame_to_free_list_info(paddr);
+    spinlock_release(&page_frame_info_lock);
+
+    uint32_t info_index = ((uint32_t) paddr - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
+    info_frame = &page_frame_info[info_index];
+
+    // reset the frame to initial state
+    do {
+        info_frame -> owner = NULL;
+        info_frame -> vaddr = NULL;
+        uint32_t info_mode = 0;
+
+        // transfer to next shared info frame
+        next_shared_info = info_frame -> next_shared_info;
+        info_frame -> next_shared_info = NULL;
+        info_frame = next_shared_info;
+    }
+    while (info_frame)
+}
+
 
 void free_memory(uint32_t ptr)
 {
@@ -580,7 +621,7 @@ void setup_process_vmem(pcb_t *p) {
 void init_memory(void)
 {
     // Initialize circular linked list to track free pages
-    initialize_free_pages();
+    //initialize_free_pages();
     initialize_page_frame_infos();
 
     next_free_mem = PAGING_AREA_MIN_PADDR;
@@ -853,20 +894,23 @@ uint32_t* try_evict_page() {
         if (!(frame_info -> info_mode & PE_INFO_PINNED)) {
             // Check if the page is dirty before deciding to evict
             int dirty = traverse_evict(frame_info->paddr);
-                if (dirty > 0) {
+            if (dirty > 0) {
                 // The page is dirty, write it back to disk
                 write_page_back_to_disk((uint32_t)frame_info->vaddr, frame_info->owner);
                 // Proceed to unmap the page
                 unmap_physical_page((uint32_t)frame_info->vaddr);
-                add_page_frame_to_free_list((uint32_t)frame_info->paddr);
-                return frame_info->vaddr; // Return the virtual address of the evicted page
 
-        } else if (dirty == 0) {
+                spinlock_acquire(&page_frame_info_lock);
+                add_page_frame_to_free_list_info((uint32_t)frame_info->paddr);
+                spinlock_release(&page_frame_info_lock);
+
+                return frame_info->vaddr; 
+            } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
                 unmap_physical_page((uint32_t)frame_info->vaddr);
-                add_page_frame_to_free_list((uint32_t)frame_info->paddr);
+                add_page_frame_to_free_list_info((uint32_t)frame_info->paddr);
                 return frame_info->vaddr;
-        } else {
+            } else {
             // page must not be evicted, continue
             continue;
             }
