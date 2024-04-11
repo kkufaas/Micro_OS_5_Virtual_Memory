@@ -513,7 +513,7 @@ static uint32_t *kernel_pdir;
 */
 static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
-    uint32_t kernel_mode = PE_P | PE_RW; // Define access mode for kernel pages.
+    uint32_t kernel_mode = PE_P | PE_RW | PE_US; // Define access mode for kernel pages.
 
     page_frame_info_t *kernel_info_page = page_alloc();
     uint32_t *kernel_ptable = kernel_info_page -> paddr;
