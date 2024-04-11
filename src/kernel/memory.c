@@ -521,16 +521,22 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     // Allocate and "pin" the page table to ensure it's not swapped out.
     // uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
     insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb, PE_INFO_PINNED);
+    
+
     /* Set the appropriate access flag (user or kernel) for the video buffer page at 0xb8000.
      * Identity maps the video memory from 0xb8000-0xb8fff for direct access.
      */
     int mode = (is_user ? user_mode : kernel_mode);
+    pr_debug("user mode ?? %d\n", mode & PE_US);
     table_map_page(
             kernel_ptable, (uint32_t) VGA_TEXT_PADDR, (uint32_t) VGA_TEXT_PADDR, mode
     );
+    dir_ins_table(pdir, VGA_TEXT_PADDR, kernel_ptable, mode);
+
     // Map the kernel memory using identity mapping for direct physical to virtual address mapping.
     for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
+        dir_ins_table(pdir, paddr, kernel_ptable, kernel_mode);
     }
     /*
      * Identity map the rest of the physical memory so the kernel can directly access
@@ -538,9 +544,9 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
      */
     for (uint32_t paddr = PAGING_AREA_MIN_PADDR; paddr < PAGING_AREA_MAX_PADDR; paddr += PAGE_SIZE) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
+        dir_ins_table(pdir, paddr, kernel_ptable, kernel_mode);
     }
-    // Insert the kernel page table into the page directory at the first entry,
-    // setting up the mapping for kernel space.
+
     dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
 }
 
@@ -589,7 +595,6 @@ void setup_process_vmem(pcb_t *p) {
 
     insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
     insert_page_frame_info(proc_pdir, proc_pdir, p, PE_INFO_PINNED);
-    dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode | PE_P);
 
 
     /*
@@ -608,6 +613,7 @@ void setup_process_vmem(pcb_t *p) {
         dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode);
         vaddr = PROCESS_VADDR + offset;
         table_map_page(proc_ptable, vaddr, paddr, user_mode);
+        dir_ins_table(proc_pdir, vaddr, proc_ptable, user_mode | PE_P);
     }
 
     // Allocate pages of stack area
@@ -623,6 +629,7 @@ void setup_process_vmem(pcb_t *p) {
         pr_debug("allocated a stack frame with vaddr=%x at paddr %x, proceeding to map \n", (uint32_t) stack_vaddr, (uint32_t) stack_page);
         // map the stack virtual address to the proc_ptable
         table_map_page(proc_ptable, stack_vaddr,  (uint32_t) stack_page, user_mode | PE_P);
+        dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P);
     }
 
 
@@ -1014,10 +1021,10 @@ uint32_t* try_evict_page()
  */ 
 
 
-#define ec_privilige_level(error_code) (error_code) & 0x4 >> 2
-#define ec_write(error_code) (error_code) & 0x2 >> 1
+#define ec_privilige_level(error_code) ((error_code) & 0x4) >> 2
+#define ec_write(error_code) ((error_code) & (1 << 1)) >> 1
 #define ec_page_not_present(error_code) !((error_code) & 0x1)
-#define ec_privilige_violation(error_code) (error_code) & 0x1
+#define ec_privilige_violation(error_code) ((error_code) & 0x1)
 
 // uint32_t total_page_fault_counter = 0;
 // uint32_t total_page_fault_page_not_present_counter = 0;
@@ -1027,6 +1034,9 @@ uint32_t* try_evict_page()
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
+    pr_debug("Handling new page fault: error code: %u \n", error_code & 0x7);
+    pr_debug("pid: %u \n", current_running -> pid);
+    pr_debug("write op? %u \n", (error_code & (1 << 1)) >> 1);
     nointerrupt_leave();
     //total_page_fault_counter++;
     if (MEMDEBUG) {
@@ -1040,8 +1050,8 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     if (ec_privilige_violation(error_code)) {
         // abort - access violation
-        pr_error("page fault: access violation");
-        pr_debug("error code: %0x \n", error_code);
+        pr_debug("error code: %u \n", error_code & 0x7);
+        pr_debug("virtual address: %x \n", load_page_fault_addr());
         abortk();
     } else {
         //total_page_fault_page_not_present_counter++;
@@ -1049,7 +1059,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         if (DEBUG_PAGEFAULT) {
             pr_debug("page fault: page not present \n");
-            pr_debug("page fault: privlige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
+            pr_debug("page fault: privilige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
             pr_debug("page fault: read/write operation (W=1, R=0) %u\n", ec_write(error_code));
             //pr_debug("total page faults: %u \n", total_page_fault_counter);
             //pr_debug("total page not present page faults: %u \n", total_page_fault_page_not_present_counter);
@@ -1057,12 +1067,8 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         uint32_t fault_address = load_page_fault_addr();
 
-        page_frame_info_t *new_page_info = page_alloc();
-        uintptr_t *new_page = new_page_info -> paddr;
-        insert_page_frame_info(new_page, (uintptr_t *) fault_address, current_running, PE_INFO_USER_MODE);
-
         if ( load_page_from_disk(fault_address, current_running) >= 0) {
-            pr_debug("loaded page from disk into memory\n");
+            pr_debug("loaded page from disk into memory\n\n");
             set_page_directory(current_running -> page_directory);
             nointerrupt_enter();
             return;
