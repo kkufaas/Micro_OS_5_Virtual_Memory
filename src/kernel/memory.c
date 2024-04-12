@@ -324,20 +324,21 @@ uintptr_t alloc_memory(size_t bytes)
  *  Allocates a page of memory by removing a page_info_frame from the list
  *  of free pages and returning a pointer of it to the user.
  */
-page_frame_info_t* page_alloc()
+uint32_t* allocate_page()
 {
+    uint32_t *paddr = NULL;
     spinlock_acquire(&page_frame_info_lock);
     page_frame_info_t* page_info_frame = remove_page_frame_from_free_list_info();
     spinlock_release(&page_frame_info_lock);
 
     // zero out the page
     if (page_info_frame) {
-        uintptr_t *paddr = page_info_frame -> paddr;
+        paddr = page_info_frame -> paddr;
         for (int i = 0; i < PAGE_SIZE; i++) {
             *(paddr + i) = 0;
         }
     }
-    return page_info_frame;
+    return paddr;
 }
 
 void page_free(uintptr_t *paddr) {
@@ -495,11 +496,11 @@ static lock_t page_map_lock = LOCK_INIT;
  * === Page allocation ===
  */
 
-uint32_t* allocate_page(void) {
-    uint32_t* page = (uint32_t*) alloc_memory(4096);
-    for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
-    return page;
-}
+// uint32_t* allocate_page(void) {
+//     uint32_t* page = (uint32_t*) alloc_memory(4096);
+//     for (int i = 0; i < 1024; i++) page[i] = 0; // Zero out the page
+//     return page;
+// }
 
 
 /* === Kernel and process setup === */
@@ -515,8 +516,11 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
     uint32_t kernel_mode = PE_P | PE_RW | PE_US; // Define access mode for kernel pages.
 
-    page_frame_info_t *kernel_info_page = page_alloc();
-    uint32_t *kernel_ptable = kernel_info_page -> paddr;
+    // page_frame_info_t *kernel_info_page = allocate_page();
+    // uint32_t *kernel_ptable = kernel_info_page -> paddr;
+
+    uint32_t *kernel_ptable = allocate_page();
+
     //uint32_t *kernel_ptable = allocate_page();
     // Allocate and "pin" the page table to ensure it's not swapped out.
     // uint32_t kernel_ptable_number = ((uintptr_t)kernel_ptable) >> PAGE_TABLE_BITS;
@@ -555,9 +559,11 @@ static void setup_kernel_vmem(void) {
     dummy_kernel_pcb -> is_thread = 1;
     uint32_t info_mode = PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY;
     lock_acquire(&page_map_lock);
-    //kernel_pdir = allocate_page();
-    page_frame_info_t *kernel_pdir_info = page_alloc();
-    kernel_pdir = kernel_pdir_info -> paddr;
+    // kernel_pdir = allocate_page();
+    // page_frame_info_t *kernel_pdir_info = allocate_page();
+    // kernel_pdir = kernel_pdir_info -> paddr;
+    kernel_pdir = allocate_page();
+
     insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
     setup_kernel_vmem_common(kernel_pdir, 0);
     lock_release(&page_map_lock);
@@ -568,8 +574,8 @@ static void setup_kernel_vmem(void) {
  */
 void setup_process_vmem(pcb_t *p) {
     // Allocate a new page directory for the process
-    page_frame_info_t *proc_pdir_info = page_alloc();
-    uint32_t *proc_pdir = proc_pdir_info -> paddr;
+    //page_frame_info_t *proc_pdir_info = allocate_page();
+    uint32_t *proc_pdir = allocate_page();
     //uint32_t *proc_pdir = allocate_page();
     uint32_t user_mode = PE_RW | PE_US;
 
@@ -590,8 +596,8 @@ void setup_process_vmem(pcb_t *p) {
 
     // Allocate and setup page table for the process's specific memory (code and data segments)
     // uint32_t *proc_ptable = allocate_page();
-    page_frame_info_t *proc_ptable_info = page_alloc();
-    uint32_t *proc_ptable = proc_ptable_info -> paddr;
+    //page_frame_info_t *proc_ptable_info = allocate_page();
+    uint32_t *proc_ptable = allocate_page();
 
     insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
     insert_page_frame_info(proc_pdir, proc_pdir, p, PE_INFO_PINNED);
@@ -623,8 +629,9 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t stack_base = PROCESS_STACK_VADDR;
     for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
         //stack_page = allocate_page();
-        page_frame_info_t *stack_page_info = page_alloc();
-        stack_page = stack_page_info -> paddr;
+        // page_frame_info_t *stack_page_info = allocate_page();
+        // stack_page = stack_page_info -> paddr;
+        stack_page = allocate_page();
         insert_page_frame_info(stack_page, (uintptr_t *) stack_vaddr, p, PE_INFO_PINNED | PE_INFO_USER_MODE);
         pr_debug("allocated a stack frame with vaddr=%x at paddr %x, proceeding to map \n", (uint32_t) stack_vaddr, (uint32_t) stack_page);
         // map the stack virtual address to the proc_ptable
@@ -865,8 +872,10 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
     uint32_t *frameref_table;
     if (! (frameref_table = get_page_table(vaddr, pcb->page_directory)) ) {
         // allocate new table
-        page_frame_info_t *frameref_table_info = page_alloc();
-        frameref_table = frameref_table_info -> paddr;
+        // page_frame_info_t *frameref_table_info = allocate_page();
+        // frameref_table = frameref_table_info -> paddr;
+        frameref_table = allocate_page();
+
 
         int info_mode;
         int mode; 
@@ -931,8 +940,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
          //return success;
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
-         page_frame_info_t *frameref_table_info = page_alloc();
-         frameref_table = frameref_table_info -> paddr;
+         // page_frame_info_t *frameref_table_info = allocate_page();
+         // frameref_table = frameref_table_info -> paddr;
+         frameref_table = allocate_page();
 
 
         insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
@@ -940,16 +950,18 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     }
 
     // tries to allocate a page if available and evicts a page if not
-    page_frame_info_t *frameref_info = page_alloc();
-    while (frameref_info == NULL) {
+    //page_frame_info_t *frameref_info = allocate_page();
+    // page_frame_info_t *frameref_info = allocate_page();
+    uint32_t *frameref = allocate_page();
+    while (frameref == NULL) {
         uint32_t *evicted_page = try_evict_page();
-        frameref_info = &page_frame_info[calculate_info_index(evicted_page)];
+        frameref = (uint32_t *) &page_frame_info[calculate_info_index(evicted_page)].paddr;
+        pr_debug("evicted page %p \n", evicted_page);
     }
 
-    uint32_t *frameref = frameref_info -> paddr;
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
     success = scsi_read(disk_loc, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
-    if (success != 0) {
+    if (success < 0) {
         pr_debug("Failed to read from disk sector %u\n", disk_loc);
         return success;
     }
