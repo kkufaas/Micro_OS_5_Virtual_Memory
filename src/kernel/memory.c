@@ -936,22 +936,15 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
 
     uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
     if (frameref_table == NULL) {
-         //pr_debug("Failed to allocate frame for virtual address 0x%08x\n", vaddr);
-         //return success;
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
-         // page_frame_info_t *frameref_table_info = allocate_page();
-         // frameref_table = frameref_table_info -> paddr;
          frameref_table = allocate_page();
-
 
         insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
         dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
     }
 
     // tries to allocate a page if available and evicts a page if not
-    //page_frame_info_t *frameref_info = allocate_page();
-    // page_frame_info_t *frameref_info = allocate_page();
     uint32_t *frameref = allocate_page();
     while (frameref == NULL) {
         uint32_t *evicted_page = try_evict_page();
@@ -963,10 +956,15 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     success = scsi_read(disk_loc, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
     if (success < 0) {
         pr_debug("Failed to read from disk sector %u\n", disk_loc);
+        pr_debug("physical frameref:              %p \n", frameref);
+        pr_debug("vaddr:                          %p \n", (uint32_t *) vaddr);
         return success;
     }
 
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
+
+    // unnecessary?
+    //dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
     pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
     return success; 
 }
