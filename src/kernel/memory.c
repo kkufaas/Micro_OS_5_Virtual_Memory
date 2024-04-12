@@ -842,12 +842,19 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
 
+    int block_count = PAGE_SIZE / SECTOR_SIZE;
+    if (disk_loc + block_count > pcb->swap_loc + pcb->swap_size) {
+        pr_debug("reducing block count for reading\n");
+        block_count = (pcb->swap_loc + pcb->swap_size) - disk_loc;
+    }
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
-    success = scsi_read(disk_loc, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
+    success = scsi_read(disk_loc, block_count, (void *) frameref);
     if (success < 0) {
         pr_debug("load_page_from_disk: Failed to read from disk sector %u\n", disk_loc);
         pr_debug("load_page_from_disk: physical frameref:              %p \n", frameref);
         pr_debug("load_page_from_disk: vaddr:                          %p \n", (uint32_t *) vaddr);
+        pr_debug("frameref mod PAGE_SIZE %u\n", (uint32_t) (frameref) % PAGE_SIZE);
+        dump_memory("load_page_from_disk: failed writing to frameref", (uint32_t) frameref, (uint32_t) (frameref + PAGE_SIZE - 1), 0);
         return success;
     }
 

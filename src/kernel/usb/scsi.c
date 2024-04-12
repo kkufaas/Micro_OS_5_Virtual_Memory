@@ -203,6 +203,7 @@ scsi_read_write(int dir, int block_start, int block_count, char *data)
     spinlock_acquire(&scsi_dev_lock);
 
     if (scsi == NULL) {
+        pr_error("scsi is null\n");
         spinlock_release(&scsi_dev_lock);
         return -1;
     }
@@ -232,6 +233,7 @@ scsi_read_write(int dir, int block_start, int block_count, char *data)
     spinlock_release(&scsi_dev_lock);
 
     if (rc != SCSI_RC_GOOD) {
+        pr_error("bad scsi result\n");
         return -1;
     }
 
