@@ -615,9 +615,10 @@ void setup_process_vmem(pcb_t *p) {
     for (offset = 0; offset < upper_lim; offset += PAGE_SIZE) {
         paddr = p->swap_loc*SECTOR_SIZE + offset;     // set as present since it is a page table.
 
-        // page not present - anything works
-        dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode);
         vaddr = PROCESS_VADDR + offset;
+        // page not present - anything works
+        //dir_ins_table(proc_pdir, PROCESS_VADDR, proc_ptable, user_mode);
+        //dir_ins_table(proc_pdir, vaddr, proc_ptable, user_mode);
         table_map_page(proc_ptable, vaddr, paddr, user_mode);
         dir_ins_table(proc_pdir, vaddr, proc_ptable, user_mode | PE_P);
     }
@@ -729,105 +730,6 @@ uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory)
     return page_table;
 }
 
-// Not in use
-// uint32_t *vaddr_to_paddr(uint32_t vaddr, uint32_t *page_directory)
-// {
-//     /*
-//      * perform a lookup in page directory
-//      * to extract physical address
-//      */
-//     uint32_t *page_table, *page, index;
-//     index = get_table_index(vaddr);
-//     if(! (page_table = get_page_table(vaddr, page_directory)) ) {
-//         goto error_notable;
-//     }
-//     page = &page_table[index];
-
-//     if (*page & PE_P)
-//         return page + (vaddr & PAGE_MASK);
-//     else 
-//         goto error_page_not_present;
-
-//     error_notable:
-//         pr_error("no page table in page_directory %p with suiting virtual address %u", page_directory, vaddr);
-//         return NULL;
-    
-//     error_page_not_present:
-//         pr_error("no page in page table %p in page directory %p suiting virtual address %u", page_table, page_directory, vaddr);
-//         return NULL;
-// }
-
-// Not in use
-// uint32_t *vaddr_to_frameref(uint32_t vaddr, uint32_t *page_directory)
-// {
-//     /*
-//      * Locates the (physical) page frame of the cirtual address
-//      * with respect to the provided page_directory
-//      */
-//     uint32_t *page_table;
-//     if( (page_table = get_page_table(vaddr, page_directory)) )
-//         return &page_table[get_table_index(vaddr)];
-//     else
-//         return NULL;
-// }
-
-// Not in use
-// uint32_t *paddr_to_frameref(uint32_t paddr)
-// {
-//     /*
-//      * Locates the (physical) page frame related to
-//      * a physical address,
-//      * Useful for checking page frame flags when evicting etc.
-//      */
-
-//     // integer division: (paddr / PAGE_SIZE) * PAGE_SIZE == PAGE_SIZE
-//     // is true only when paddr is a multiple of PAGE_SIZE
-//     // uint32_t *frameref = (uint32_t *) ((paddr / PAGE_SIZE)*PAGE_SIZE);
-//     // if (*frameref & PE_P) return frameref;
-//     // else return NULL;
-
-//     //  
-//     //  memory in kernel is identity mapped, so we can treat
-//     //  the physical addres paddr as a virtual address inside
-//     //  the kernel
-//     return vaddr_to_frameref(paddr, kernel_pdir);
-// }
-
-// Not in use
-// Calculates the disk offset for a given physical address.
-// Uses PAGING_AREA_MIN_PADDR as the base address for disk offset calculations.
-// uint32_t calculate_disk_offset(uint32_t paddr) {
-//     // Use the defined base address where the swap space or process images start.
-//     const uint32_t DISK_BASE_ADDR = PAGING_AREA_MIN_PADDR;
-//     // The offset is the difference from this base.
-//     return paddr - DISK_BASE_ADDR;
-// }
-
-// Not in use
-// void clear_page_dirty_bit(uint32_t vaddr, uint32_t* page_directory) {
-//     page_set_mode(page_directory, vaddr, PE_P | PE_RW); 
-// }
-
-// Not in use
-// uint32_t virtual_to_physical_address(uint32_t vaddr, uint32_t* page_directory) {
-//     uint32_t dir_index = get_directory_index(vaddr);
-//     uint32_t dir_entry = page_directory[dir_index];
-
-//     if (!(dir_entry & PE_P)) {
-//         return 0;
-//     }
-//     uint32_t* page_table = (uint32_t*)(dir_entry & PE_BASE_ADDR_MASK);
-//     uint32_t table_index = get_table_index(vaddr);
-//     uint32_t page_entry = page_table[table_index];
-
-//     if (!(page_entry & PE_P)) {
-//         return 0;
-//     }
-//     // Extract the physical address from the page table entry and the offset from the virtual address.
-//     uint32_t page_offset = vaddr & PAGE_MASK;
-//     uint32_t physical_page_start = page_entry & PE_BASE_ADDR_MASK;
-//     return physical_page_start + page_offset;
-// }
 
 uint32_t vaddr_to_disk_addr(uint32_t vaddr, pcb_t *pcb, int *error)
 {
@@ -870,29 +772,13 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
     //uint32_t disk_loc = disk_offset/SECTOR_SIZE;
 
     uint32_t *frameref_table;
-    if (! (frameref_table = get_page_table(vaddr, pcb->page_directory)) ) {
-        // allocate new table
-        // page_frame_info_t *frameref_table_info = allocate_page();
-        // frameref_table = frameref_table_info -> paddr;
-        frameref_table = allocate_page();
-
-
-        int info_mode;
-        int mode; 
-        if (pcb -> is_thread) {
-            info_mode = PE_INFO_PINNED;
-            mode = PE_P | PE_RW;
-        } else {
-            info_mode = PE_INFO_USER_MODE;
-            mode = PE_P | PE_RW | PE_US;
-        }
-        insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
-        dir_ins_table(pcb -> page_directory, vaddr, frameref_table, mode);
-    } 
-
+    if (  !(frameref_table = get_page_table(vaddr, pcb->page_directory))  ) {
+        // nothing to do, no page with this virtuall address precent in pcb page dir
+        pr_debug("write_page_back_to_disk: no vaddr found in page directory\n");
+        return -1;
+    }
 
     uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
-
     success = scsi_write(disk_loc, PAGE_SIZE/SECTOR_SIZE, (void *) frameref);
 
     // Clear the dirty bit for this page in the page table to simulate writing it back to disk.
@@ -900,7 +786,8 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
     return success; //success
 }
 
-int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
+int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir) 
+{
 
     /* 
      * pcb-> swap_loc is sector number on disk, pcb -> swap_size is number of sectors.
@@ -913,9 +800,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
 
     if (disk_offset > pcb -> swap_size) {
-        pr_error("too large virtual address for the swap image for pid %u\n", pcb->pid);
-        pr_debug("disk_offset %u \n", disk_offset);
-        pr_debug("vaddr:  %x \n", vaddr);
+        pr_error("load_page_from_disk: too large virtual address for the swap image for pid %u\n", pcb->pid);
+        pr_debug("load_page_from_disk: disk_offset %u \n", disk_offset);
+        pr_debug("load_page_from_disk: vaddr:  %x \n", vaddr);
         return success;
     }
 
@@ -934,14 +821,14 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     }
 
 
-    uint32_t *frameref_table = get_page_table(vaddr, pcb->page_directory);
+    uint32_t *frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
          frameref_table = allocate_page();
 
         insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
-        dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
+        dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     }
 
     // tries to allocate a page if available and evicts a page if not
@@ -949,23 +836,25 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb) {
     while (frameref == NULL) {
         uint32_t *evicted_page = try_evict_page();
         frameref = (uint32_t *) &page_frame_info[calculate_info_index(evicted_page)].paddr;
-        pr_debug("evicted page %p \n", evicted_page);
+        pr_debug("load_page_from_disk: evicted page %p \n", evicted_page);
     }
+
+    table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
+    dir_ins_table(fault_dir, vaddr, frameref_table, mode);
 
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
     success = scsi_read(disk_loc, PAGE_SIZE / SECTOR_SIZE, (void *) frameref);
     if (success < 0) {
-        pr_debug("Failed to read from disk sector %u\n", disk_loc);
-        pr_debug("physical frameref:              %p \n", frameref);
-        pr_debug("vaddr:                          %p \n", (uint32_t *) vaddr);
+        pr_debug("load_page_from_disk: Failed to read from disk sector %u\n", disk_loc);
+        pr_debug("load_page_from_disk: physical frameref:              %p \n", frameref);
+        pr_debug("load_page_from_disk: vaddr:                          %p \n", (uint32_t *) vaddr);
         return success;
     }
 
-    table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
 
     // unnecessary?
     //dir_ins_table(pcb->page_directory, vaddr, frameref_table, mode);
-    pr_debug("Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
+    pr_debug("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
     return success; 
 }
 
@@ -1044,14 +933,30 @@ uint32_t* try_evict_page()
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
-    pr_debug("Handling new page fault: error code: %u \n", error_code & 0x7);
-    pr_debug("pid: %u \n", current_running -> pid);
-    pr_debug("write op? %u \n", (error_code & (1 << 1)) >> 1);
+    uint32_t *fault_address = (uint32_t *) load_page_fault_addr();
+    uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
+
+    pcb_t *fault_pcb = current_running;
+
+    pr_debug("page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
+    pr_debug("page_fault_handler: pid: %u \n", current_running -> pid);
+    pr_debug("page_fault_handler: write op? %u \n", (error_code & (1 << 1)) >> 1);
+    pr_debug("page_fault_handler: interrupt stack frame -> instruction pointer ip:   %p \n", (uintptr_t *) stack_frame -> ip);
+    pr_debug("page_fault_handler: interrupt stack frame -> code segment selector cs: %p \n", (uintptr_t *) stack_frame -> cs);
+
+    pr_debug("page_fault_handler: interrupt stack frame -> stack pointer sp:          %p \n", (uintptr_t *) stack_frame -> sp);
+    pr_debug("page_fault_handler: interrupt stack frame -> stack segment selector ss: %p \n", (uintptr_t *) stack_frame -> ss);
+
+    pr_debug("page_fault_handler: fault addres: %p \n", fault_address);
+    pr_debug("page_fault_handler: fault directory %p \n", fault_directory);
+    pr_debug("page_fault_handler: fault_pcb -> page_directory %p \n", fault_pcb -> page_directory);
+
+
     nointerrupt_leave();
     //total_page_fault_counter++;
     if (MEMDEBUG) {
         print_pcb_table();
-        pr_debug("error code: %u \n", error_code & 0x7);
+        pr_debug("page_fault_handler: error code: %u \n", error_code & 0x7);
     }
     // bool error_code_privilige = (error_code & 0x4) >> 2;
     // bool error_code_write = (error_code & 0x2) >> 1;
@@ -1060,25 +965,23 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     if (ec_privilige_violation(error_code)) {
         // abort - access violation
-        pr_debug("error code: %u \n", error_code & 0x7);
-        pr_debug("virtual address: %x \n", load_page_fault_addr());
+        pr_debug("page_fault_handler: error code: %u \n", error_code & 0x7);
+        pr_debug("page_fault_handler: virtual address: %p \n", fault_address);
         abortk();
     } else {
         //total_page_fault_page_not_present_counter++;
         // page not present
 
         if (DEBUG_PAGEFAULT) {
-            pr_debug("page fault: page not present \n");
-            pr_debug("page fault: privilige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
-            pr_debug("page fault: read/write operation (W=1, R=0) %u\n", ec_write(error_code));
+            pr_debug("page-fault_handler: page not present \n");
+            pr_debug("page-fault_handler: privilige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
+            pr_debug("page-fault_handler: read/write operation (W=1, R=0) %u\n", ec_write(error_code));
             //pr_debug("total page faults: %u \n", total_page_fault_counter);
             //pr_debug("total page not present page faults: %u \n", total_page_fault_page_not_present_counter);
         }
 
-        uint32_t fault_address = load_page_fault_addr();
-
-        if ( load_page_from_disk(fault_address, current_running) >= 0) {
-            pr_debug("loaded page from disk into memory\n\n");
+        if ( load_page_from_disk((uint32_t) fault_address, fault_pcb, fault_directory) >= 0) {
+            pr_debug("page_fault_handler: loaded page from disk into memory\n\n");
             set_page_directory(current_running -> page_directory);
             nointerrupt_enter();
             return;
@@ -1093,83 +996,4 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     nointerrupt_enter();
 
-/*
-    page_fault_handler, pseudocode:
-    ===============================
-    // Step 1: Retrieve the faulting address from CR2 register
-    faulting_address = call load_page_fault_addr() -- precode, cpu_x86.h
-
-    // Step 2: Log or print the fault details for debugging
-    log_page_fault(faulting_address, error_code) -- check presence/need to implement
-
-    // Step 3: Decode the error code to understand the nature of the fault
-    if error_code indicates protection violation:
-        // This is an access violation, not just a page not being present.
-        // It could mean an illegal access by a program, such as writing to a read-only page,
-        // accessing kernel memory from user mode, etc.
-        handle_protection_violation(faulting_address, error_code) -- check presence/need to implement
-        return
-
-    if error_code indicates the page is not present:
-        // The page the program wants to access is not in memory.
-        
-        // Step 4: Check if the address is within a valid range for the current process
-        if not valid_address_for_process(faulting_address): -- check presence/need to implement
-            handle_invalid_access(faulting_address) -- check presence/need to implement
-            return
-        
-        // Step 5: Determine if the page needs to be loaded from disk or just allocated
-        if page_needs_to_be_loaded_from_disk(faulting_address): -- check presence/need to implement
-
-            // Step 6: Check if there's a free page available
-            if not is_free_page_available(): -- check presence/need to implement
-
-                // Step 7: Evict a page if no free pages are available
-                DONE evicted_page = select_page_for_eviction()
-                TO FINISH! try_to_evict_page(evicted_page)
-            
-            // Step 8: Load the page into a free page frame
-            load_page_from_disk(faulting_address) -- check presence/need to implement
-        else:
-            // The page is not present because it hasn't been allocated yet (e.g., stack growth)
-            allocate_new_page(faulting_address) -- check presence/need to implement
-        
-        // Step 9: Update the page table to reflect the changes
-        update_page_table(faulting_address) -- check presence/need to implement
-        return
-
-
-Function to find in precode or implement:
-=========================================
-
-function log_page_fault(faulting_address, error_code):
-    // Log the faulting address and error code details for debugging purposes
-
-function handle_protection_violation(faulting_address, error_code):
-    // Handle protection violations, such as illegal accesses
-
-function valid_address_for_process(faulting_address):
-    // Check if the faulting address is within the valid address space of the current process
-
-function page_needs_to_be_loaded_from_disk(faulting_address):
-    // Determine if the faulting address corresponds to data that needs to be loaded from disk
-
-function is_free_page_available():
-    // Check if there is a free page available in physical memory
-
-DONE function select_page_for_eviction():
-    // Select a page to evict based on the eviction policy (e.g., LRU, random?)
-
-TO FINISH!function try_to_evict_page(page):
-    // Evict the specified page, writing it back to disk if necessary
-
-function load_page_from_disk(faulting_address):
-    // Load the required data from disk into the corresponding physical page
-
-function allocate_new_page(faulting_address):
-    // Allocate a new page in physical memory for the faulting address
-
-function update_page_table(faulting_address):
-    // Update the page table entry for the faulting address to reflect the new page frame
-*/
 }

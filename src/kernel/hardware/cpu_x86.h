@@ -371,7 +371,7 @@ static inline void enable_paging()
 static inline uintptr_t load_current_page_directory()
 {
     uintptr_t cr3;
-    asm inline volatile("mov    %%cr3, %0" :: "r"(cr3));
+    asm inline volatile("mov    %%cr3,  %0" : "=r"(cr3));
     return cr3;
 }
 
