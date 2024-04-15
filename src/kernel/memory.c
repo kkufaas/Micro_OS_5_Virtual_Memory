@@ -30,7 +30,6 @@
 #define UNUSED(x) ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 #define KERNEL_SIZE 0x300000 // 3 MB in hexadecimal
-static unsigned long next = 1; // Used in random function
 #define MEMDEBUG 1
 #define DEBUG_PAGEFAULT 1
 #define MEM_DEBUG_LOADPROC 1
@@ -48,7 +47,6 @@ enum {
 
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock = SPINLOCK_INIT;
-
 static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 
 
@@ -77,6 +75,53 @@ uint32_t* try_evict_page();
 // idea from hashmaps: collisions only for physical
 // pages shared between different processes
 //
+/* === Info structure to keep track on fifo queue === */
+typedef struct {
+    int front, rear;
+    int queue[PAGEABLE_PAGES];
+} FIFOQueue;
+
+static FIFOQueue fifo_queue;
+
+void fifo_init() {
+    fifo_queue.front = -1;
+    fifo_queue.rear = -1;
+}
+
+bool fifo_is_empty() {
+    return fifo_queue.front == -1;
+}
+
+bool fifo_is_full() {
+    return (fifo_queue.rear + 1) % PAGEABLE_PAGES == fifo_queue.front;
+}
+
+bool fifo_enqueue(int item) {
+    if (fifo_is_full()) {
+        return false;
+    }
+    if (fifo_is_empty()) {
+        fifo_queue.front = fifo_queue.rear = 0;
+    } else {
+        fifo_queue.rear = (fifo_queue.rear + 1) % PAGEABLE_PAGES;
+    }
+    fifo_queue.queue[fifo_queue.rear] = item;
+    return true;
+}
+
+int fifo_dequeue() {
+    if (fifo_is_empty()) {
+        return -1;  // Indicates queue is empty
+    }
+    int item = fifo_queue.queue[fifo_queue.front];
+    if (fifo_queue.front == fifo_queue.rear) {
+        fifo_queue.front = fifo_queue.rear = -1;  // Reset queue if it becomes empty
+    } else {
+        fifo_queue.front = (fifo_queue.front + 1) % PAGEABLE_PAGES;
+    }
+    return item;
+}
+
 
 /* === Info structure to keep track on pages condition === */
 
@@ -143,6 +188,9 @@ to avoid race conditions.
 void add_page_frame_to_free_list_info(uintptr_t *paddress) {
     // Convert 'address' to its corresponding index in the free_pages array
     int index = ((uint32_t) paddress - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
+        if (!fifo_enqueue(index)) {
+        pr_debug("FIFO queue is full, cannot enqueue new page\n");
+    }
     page_frame_info_t* page_frame = &page_frame_info[index];
     // Prepend this page_frame to the start of the free list
     page_frame_info->next_free_page = page_free_head;
@@ -222,6 +270,8 @@ page_frame_info_t* insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
         return info;
     }
 }
+
+
 
 
 
@@ -587,27 +637,21 @@ void setup_process_vmem(pcb_t *p) {
 void init_memory(void)
 {
     initialize_page_frame_infos();
+    fifo_init();
     next_free_mem = PAGING_AREA_MIN_PADDR;
     setup_kernel_vmem();
 
 }
 
-
 /*
-Generates a pseudo-random number using a linear congruential generator.
-paddr of a page is then result*PAGE_SIZE + PAGING_AREA_MIN_PADDR
-*/ 
-unsigned long generate_random_number() {
-    next = next * 1103515245 + 12345;
-    return (unsigned long)(next/65536) % 32768;
-}
-
-/*
-Random eviction algorithm
+FIFO eviction algorithm
 */ 
 uint32_t select_page_for_eviction() {
-    uint32_t random_page_number = generate_random_number() % PAGEABLE_PAGES;
-    return random_page_number*PAGE_SIZE + PAGING_AREA_MIN_PADDR;
+    int index = fifo_dequeue();
+    if (index == -1) {
+        pr_debug("FIFO queue is empty, no page available for eviction\n");
+    }
+    return (uintptr_t)page_frame_info[index].paddr;
 }
 
 // Checks if the given page is dirty by looking up its page table entry
@@ -665,7 +709,7 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb){
     }
     uint32_t disk_loc = pcb -> swap_loc + disk_offset;
     uint32_t *frameref_table;
-    if (  !(frameref_table = get_page_table(vaddr, pcb->page_directory))  ) {
+    if ( !(frameref_table = get_page_table(vaddr, pcb->page_directory))  ) {
         // nothing to do, no page with this virtuall address precent in pcb page dir
         pr_debug("write_page_back_to_disk: no vaddr found in page directory\n");
         return -1;
@@ -722,21 +766,22 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
     if (frameref_table == NULL) {
          // no table exists in page dir with the virtual address
          // allocate new page table and insert into page directory
-         frameref_table = allocate_page();
+        frameref_table = allocate_page();
         insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
         dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     }
 
 
     uint32_t *frameref = allocate_page();
-    while (frameref == NULL) {
-        //uint32_t *evicted_page = try_evict_page();
-        //frameref = (uint32_t *) &page_frame_info[calculate_info_index(evicted_page)].paddr;
-        //pr_debug("load_page_from_disk: evicted page %p \n", evicted_page);
-        pr_error("load_page_from_disk: Unable to allocate a frame for PID %u, VADDR %p\n", pcb->pid, (void *)vaddr);
-        return -1;
+    if (!frameref) {
+        uint32_t *evicted_page_vaddr = try_evict_page();
+        if (!evicted_page_vaddr) {
+            pr_error("load_page_from_disk: Unable to allocate or evict a frame for PID %u\n", pcb->pid);
+            return -1;
+        }
+        frameref = evicted_page_vaddr; // Assume the physical address returned is ready for reuse
+        pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
     }
-
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     //int block_count = PAGE_SIZE / SECTOR_SIZE;
@@ -750,9 +795,11 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
         pr_debug("load_page_from_disk: Failed to read from disk sector %u\n", disk_loc);
         return success;
     }
-    //pr_debug("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
+    pr_debug("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
+    fifo_enqueue((uint32_t)frameref); 
     return success; 
 }
+
 
 
 // Attempts to find and evict a page
@@ -764,14 +811,23 @@ uint32_t* try_evict_page()
     page_frame_info_t *frame_info;
     //uint32_t *base = (uint32_t *) PAGING_AREA_MIN_PADDR;
 
-    for (int attempts = 0; attempts < PAGEABLE_PAGES; ++attempts) {
-        frameref = (uintptr_t *) select_page_for_eviction();
+    while (!fifo_is_empty()) {  // Ensure there's something in the FIFO queue
+        uintptr_t evicted_page_physical = select_page_for_eviction();  // Get the physical address of the page to evict
+        if (!evicted_page_physical) {
+            pr_debug("try_to_evict: No suitable page found for eviction\n");
+            return NULL;
+        }   
+
+        frameref = (uintptr_t *) evicted_page_physical;
         info_index = calculate_info_index(frameref);
         frame_info = &page_frame_info[info_index];
+
+
         if (!(frame_info -> info_mode & PE_INFO_PINNED)) {
             // Check if the page is dirty before deciding to evict
             int dirty = traverse_evict(frame_info->paddr);
             if (dirty > 0) {
+                pr_debug("try_to_evict: dirty \n");
                 // The page is dirty, write it back to disk
                 write_page_back_to_disk((uint32_t)frame_info->vaddr, frame_info->owner);
                 // Proceed to unmap the page
@@ -779,8 +835,6 @@ uint32_t* try_evict_page()
                 spinlock_acquire(&page_frame_info_lock);
                 add_page_frame_to_free_list_info(frame_info->paddr);
                 spinlock_release(&page_frame_info_lock);
-                pr_debug("try_to_evict: dirty \n");
-
                 return frame_info->vaddr; 
             } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
@@ -828,6 +882,7 @@ uint32_t* try_evict_page()
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
+    
     uint32_t *fault_address = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
 
@@ -853,7 +908,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         print_pcb_table();
         pr_debug("page_fault_handler: error code: %u \n", error_code & 0x7);
     }
-
     if (ec_privilige_violation(error_code)) {
         // abort - access violation
         pr_debug("page_fault_handler: error code: %u \n", error_code & 0x7);
@@ -862,7 +916,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
     } else {
         //total_page_fault_page_not_present_counter++;
         // page not present
-
         if (DEBUG_PAGEFAULT) {
             pr_debug("page-fault_handler: page not present \n");
             pr_debug("page-fault_handler: privilige level (U = 1; S = 0) %u\n", ec_privilige_level(error_code));
@@ -871,20 +924,17 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             //pr_debug("total page not present page faults: %u \n", total_page_fault_page_not_present_counter);
         }
 
-        if ( load_page_from_disk((uint32_t) fault_address, fault_pcb, fault_directory) >= 0) {
+        if (load_page_from_disk((uint32_t) fault_address, fault_pcb, fault_directory) >= 0) {
             pr_debug("page_fault_handler: loaded page from disk into memory\n\n");
             set_page_directory(current_running -> page_directory);
             nointerrupt_enter();
             return;
         }
 
-    }
-
     todo_use(stack_frame);
     todo_use(error_code);
     todo_use(page_map_lock);
     todo_abort();
-
     nointerrupt_enter();
-
+    }
 }
