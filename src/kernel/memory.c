@@ -681,15 +681,33 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
     /* 
      * pcb-> swap_loc is sector number on disk, pcb -> swap_size is number of sectors.
      */
-    int success = -1;
+    uint32_t block_count = PAGE_SIZE / SECTOR_SIZE;
     uint32_t disk_offset = (vaddr - PROCESS_VADDR) / PAGE_SIZE;
     disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
-    if (disk_offset > pcb -> swap_size) {
-        pr_error("load_page_from_disk: too large virtual address for the swap image for pid %u\n", pcb->pid);
-        return success;
-    }
+    // Compute the actual disk location by adding the swap location
+    uint32_t disk_loc = pcb->swap_loc + disk_offset;
 
-    uint32_t disk_loc = pcb -> swap_loc + disk_offset;
+    pr_debug("load_page_from_disk: Start loading from disk for PID %u, VADDR %p\n", pcb->pid, (void *)vaddr);
+    pr_debug("load_page_from_disk: Calculated page number %u from VADDR %p\n", disk_offset, (void *)vaddr);
+    pr_debug("load_page_from_disk: Calculated initial disk offset %u sectors\n", disk_offset);
+
+    // Check if the disk offset exceeds the allocated swap size
+    if (disk_offset >= pcb->swap_size * (PAGE_SIZE / SECTOR_SIZE)) {
+        pr_error("load_page_from_disk: Virtual address %p is beyond swap area (disk offset %u, swap size %u) for PID %u\n", (void *)vaddr, disk_offset, pcb->swap_size, pcb->pid);
+        uint32_t *evicted_page_vaddr = try_evict_page();
+        if (evicted_page_vaddr == NULL) {
+            pr_error("load_page_from_disk: No page available for eviction, cannot allocate memory for PID %u\n", pcb->pid);
+        return -1;
+    }
+    pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
+    }
+    //pr_debug("load_page_from_disk: Final disk location to read from is %u sectors\n", disk_loc);
+    //int success = -1;
+    //uint32_t disk_offset = (vaddr - PROCESS_VADDR) / PAGE_SIZE;
+    //disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
+
+    //pr_debug("load_page_from_disk: Calculated disk offset %u, swap size %u\n", disk_offset, pcb->swap_size);
+
     uint32_t info_mode;
     uint32_t mode = PE_P | PE_RW;
     if (pcb -> is_thread) {
@@ -698,6 +716,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
         info_mode = PE_INFO_USER_MODE;
         mode |= PE_US;
     }
+
+    // Attempt to allocate or find a free page
     uint32_t *frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
          // no table exists in page dir with the virtual address
@@ -707,23 +727,25 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
         dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     }
 
-    // tries to allocate a page if available and evicts a page if not
+
     uint32_t *frameref = allocate_page();
     while (frameref == NULL) {
-        uint32_t *evicted_page = try_evict_page();
-        frameref = (uint32_t *) &page_frame_info[calculate_info_index(evicted_page)].paddr;
-        pr_debug("load_page_from_disk: evicted page %p \n", evicted_page);
+        //uint32_t *evicted_page = try_evict_page();
+        //frameref = (uint32_t *) &page_frame_info[calculate_info_index(evicted_page)].paddr;
+        //pr_debug("load_page_from_disk: evicted page %p \n", evicted_page);
+        pr_error("load_page_from_disk: Unable to allocate a frame for PID %u, VADDR %p\n", pcb->pid, (void *)vaddr);
+        return -1;
     }
 
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
-    int block_count = PAGE_SIZE / SECTOR_SIZE;
+    //int block_count = PAGE_SIZE / SECTOR_SIZE;
     if (disk_loc + block_count > pcb->swap_loc + pcb->swap_size) {
         //pr_debug("reducing block count for reading\n");
         block_count = (pcb->swap_loc + pcb->swap_size) - disk_loc;
     }
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
-    success = scsi_read(disk_loc, block_count, (void *) frameref);
+    int success = scsi_read(disk_loc, block_count, (void *) frameref);
     if (success < 0) {
         pr_debug("load_page_from_disk: Failed to read from disk sector %u\n", disk_loc);
         return success;
@@ -754,19 +776,21 @@ uint32_t* try_evict_page()
                 write_page_back_to_disk((uint32_t)frame_info->vaddr, frame_info->owner);
                 // Proceed to unmap the page
                 unmap_physical_page((uint32_t)frame_info->vaddr);
-
                 spinlock_acquire(&page_frame_info_lock);
                 add_page_frame_to_free_list_info(frame_info->paddr);
                 spinlock_release(&page_frame_info_lock);
+                pr_debug("try_to_evict: dirty \n");
 
                 return frame_info->vaddr; 
             } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
+                pr_debug("try_to_evict: not dirty \n");
                 unmap_physical_page((uint32_t)frame_info->vaddr);
                 add_page_frame_to_free_list_info(frame_info->paddr);
                 return frame_info->vaddr;
             } else {
             // page must not be evicted, continue
+            pr_debug("try_to_evict: cannot evict \n");
             continue;
             }
         }
