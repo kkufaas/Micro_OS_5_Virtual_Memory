@@ -774,6 +774,7 @@ void setup_process_vmem(pcb_t *p)
                 stack_page, (uintptr_t *) stack_vaddr, p,
                 PE_INFO_PINNED | PE_INFO_USER_MODE
         );
+        inc_pinned_pages(1);
         pr_debug(
                 "allocated a stack frame with vaddr=%x at paddr %x, "
                 "proceeding to map \n",
@@ -840,9 +841,6 @@ bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory)
 
 void unmap_physical_page(uint32_t *process_directory, uint32_t vaddr)
 {
-    // Eindride 8/04-22:
-    // Changed kernel_pdir to current_running->page_directory
-    // Given mode 0 clears the PE_P bit
     page_set_mode(process_directory, vaddr, 0);
 }
 /*
@@ -1179,7 +1177,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             error_code & 0x7
     );
     print_page_table_info();
-    pr_debug("page_fault_handler: pid: %u \n", current_running->pid);
+    pr_debug("page_fault_handler: pid: %u \n", fault_pcb->pid);
     pr_debug(
             "page_fault_handler: write op? %u \n", (error_code & (1 << 1)) >> 1
     );
@@ -1256,7 +1254,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
                     "page_fault_handler: loaded page from disk into "
                     "memory\n\n"
             );
-            set_page_directory(current_running->page_directory);
+            set_page_directory(fault_pcb->page_directory);
             nointerrupt_enter();
             return;
         }
