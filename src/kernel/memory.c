@@ -275,37 +275,6 @@ page_frame_info_t* insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
 
 
 
-/*
- * Processes all page tables with a reference to the physical address paddr.
- * Checks if the pages are dirty
- * Returns -1 if paddr must not be evicted
- * Returns 0 when not dirty
- * Returns 1 when dirty
- */
-int traverse_evict(uintptr_t *paddr) {
-    int dirty = 0;
-    uint32_t info_index = calculate_info_index(paddr);
-    page_frame_info_t *info = &page_frame_info[info_index];
-    uint32_t *current_pdir= info -> owner -> page_directory;
-    uint32_t current_vaddr = (uint32_t) info -> vaddr;
-    while (info -> next_shared_info) {
-        // process next_shared_info
-        // if (info -> owner == current_running) {
-        // }
-        // process vaddr of info
-        // check if dirty
-        if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
-            dirty += is_page_dirty(current_vaddr, current_pdir);
-        } else {
-            // trying to evict kernel page dir
-            // frame should be pinned and this should never happen!
-            pr_error("Trying to evict kernel page directory \n");
-            return -1;
-        }
-    }
-    //page_set_mode
-    return dirty;
-}
 
 /*
  * Allocate contiguous bytes of memory aligned to a page boundary
@@ -364,8 +333,13 @@ uint32_t* allocate_page()
         // page table full, evict
         pr_debug("allocate_page: page table full, evicting page\n");
         paddr = try_evict_page();
+        pr_debug("allocate_page: evicted a page and now returning paddr %p\n", paddr);
     }
-    if (!paddr) pr_error("allocate_page: couldn't allocate a page!");
+    if (!paddr) {
+        pr_error("allocate_page: couldn't allocate a page!");
+    } else {
+        pr_error("allocate_page: allocated page frame %p \n", paddr);
+    }
     return paddr;
 }
 
@@ -848,6 +822,40 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
 }
 
 
+/*
+ * Processes all page tables with a reference to the physical address paddr.
+ * Checks if the pages are dirty
+ * Returns -1 if paddr must not be evicted
+ * Returns 0 when not dirty
+ * Returns 1 when dirty
+ */
+int check_dirty_traverse(uintptr_t *paddr) {
+    int dirty = 0;
+    uint32_t info_index = calculate_info_index(paddr);
+    page_frame_info_t *info = &page_frame_info[info_index];
+    uint32_t *current_pdir= info -> owner -> page_directory;
+    uint32_t current_vaddr = (uint32_t) info -> vaddr;
+    while (info -> next_shared_info) {
+        // process next_shared_info
+        // if (info -> owner == current_running) {
+        // }
+        // process vaddr of info
+        // check if dirty
+        if (! (info -> info_mode & PE_INFO_KERNEL_DUMMY) ) {
+            dirty += is_page_dirty(current_vaddr, current_pdir);
+        } else {
+            // trying to evict kernel page dir
+            // frame should be pinned and this should never happen!
+            pr_error("Trying to evict kernel page directory \n");
+            return -1;
+        }
+    }
+    //page_set_mode
+    return dirty;
+}
+
+
+
 
 // Attempts to find and evict a page
 // Returns virtual address of the page that was evicted, or NULL if no suitable page was found.
@@ -872,7 +880,7 @@ uint32_t* try_evict_page()
 
         if (!(frame_info -> info_mode & PE_INFO_PINNED)) {
             // Check if the page is dirty before deciding to evict
-            int dirty = traverse_evict(frame_info->paddr);
+            int dirty = check_dirty_traverse(frame_info->paddr);
             if (dirty > 0) {
                 pr_debug("try_to_evict: dirty \n");
                 // The page is dirty, write it back to disk
@@ -935,7 +943,8 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     pcb_t *fault_pcb = current_running;
 
-    pr_debug("\n\n\n\n\n\n\n page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
+    pr_debug("\n\n\n\n\n\n\n");
+    pr_debug("page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
     print_page_table_info();
     pr_debug("page_fault_handler: pid: %u \n", current_running -> pid);
     pr_debug("page_fault_handler: write op? %u \n", (error_code & (1 << 1)) >> 1);
