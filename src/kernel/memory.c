@@ -340,7 +340,7 @@ uintptr_t alloc_memory(size_t bytes)
  *  Allocates a page of memory by removing a page_info_frame from the list
  *  of free pages and returning a pointer of it to the user.
  */
-uint32_t* allocate_page()
+uint32_t* allocate_page_internal()
 {
     uint32_t *paddr = NULL;
     spinlock_acquire(&page_frame_info_lock);
@@ -353,7 +353,19 @@ uint32_t* allocate_page()
         for (int i = 0; i < PAGE_SIZE; i++) {
             *(paddr + i) = 0;
         }
+    }     
+    return paddr;
+}
+
+uint32_t* allocate_page()
+{
+    uint32_t* paddr = allocate_page_internal();
+    if (paddr == NULL) {
+        // page table full, evict
+        pr_debug("allocate_page: page table full, evicting page\n");
+        paddr = try_evict_page();
     }
+    if (!paddr) pr_error("allocate_page: couldn't allocate a page!");
     return paddr;
 }
 
@@ -917,14 +929,14 @@ uint32_t* try_evict_page()
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
-    print_page_table_info();
     uint32_t *fault_address = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
     //uint32_t error_code_decoded = error_code & (1 << 1) >> 1;
 
     pcb_t *fault_pcb = current_running;
 
-    pr_debug("page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
+    pr_debug("\n\n\n\n\n\n\n page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
+    print_page_table_info();
     pr_debug("page_fault_handler: pid: %u \n", current_running -> pid);
     pr_debug("page_fault_handler: write op? %u \n", (error_code & (1 << 1)) >> 1);
     pr_debug("page_fault_handler: interrupt stack frame -> instruction pointer ip:   %p \n", (uintptr_t *) stack_frame -> ip);
