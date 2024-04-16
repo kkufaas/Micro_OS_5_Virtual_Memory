@@ -54,6 +54,7 @@ inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t* get_page_table(uint32_t vaddr, uint32_t* page_directory);
 bool is_page_dirty(uint32_t vaddr, uint32_t *page_directory);
 uint32_t* try_evict_page();
+uint32_t calculate_info_index(uintptr_t *paddr);
  
 ///////////////////////////////////////////////////////
 // similar (but static) datastructure as in INF1101
@@ -77,51 +78,61 @@ uint32_t* try_evict_page();
 //
 /* === Info structure to keep track on fifo queue === */
 typedef struct {
-    int front, rear;
-    int queue[PAGEABLE_PAGES];
+    uint32_t next_in, next_out;
+    uint32_t queue[PAGEABLE_PAGES];
 } FIFOQueue;
 
 static FIFOQueue fifo_queue;
 
 void fifo_init() {
-    fifo_queue.front = -1;
-    fifo_queue.rear = -1;
+    //fifo_queue.front = -1;
+    //fifo_queue.rear = -1;
+
+    fifo_queue.next_in = 0;
+    fifo_queue.next_out = 0;
 }
 
 bool fifo_is_empty() {
-    return fifo_queue.front == -1;
+    return fifo_queue.next_in == fifo_queue.next_out;
 }
 
 bool fifo_is_full() {
-    return (fifo_queue.rear + 1) % PAGEABLE_PAGES == fifo_queue.front;
+    return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
 }
 
-bool fifo_enqueue(int item) {
+bool fifo_enqueue(uint32_t item) {
     if (fifo_is_full()) {
         return false;
     }
-    if (fifo_is_empty()) {
-        fifo_queue.front = fifo_queue.rear = 0;
-    } else {
-        fifo_queue.rear = (fifo_queue.rear + 1) % PAGEABLE_PAGES;
-    }
-    fifo_queue.queue[fifo_queue.rear] = item;
+    fifo_queue.queue[fifo_queue.next_in] = item;
+    fifo_queue.next_in = (fifo_queue.next_in + 1) % PAGEABLE_PAGES;
     return true;
 }
 
-int fifo_dequeue() {
+uint32_t fifo_dequeue(int *error) {
     if (fifo_is_empty()) {
-        return -1;  // Indicates queue is empty
+        *error = 1;  // Indicates queue is empty
     }
-    int item = fifo_queue.queue[fifo_queue.front];
-    if (fifo_queue.front == fifo_queue.rear) {
-        fifo_queue.front = fifo_queue.rear = -1;  // Reset queue if it becomes empty
-    } else {
-        fifo_queue.front = (fifo_queue.front + 1) % PAGEABLE_PAGES;
-    }
+    uint32_t item = fifo_queue.queue[fifo_queue.next_out];
+    fifo_queue.next_out = (fifo_queue.next_out + 1) % PAGEABLE_PAGES;
     return item;
 }
 
+
+bool fifo_enqueue_info(uint32_t *paddr)
+{
+    return fifo_enqueue(calculate_info_index(paddr));
+}
+
+
+uint32_t* fife_dequeue_info() 
+{
+    int error = 0;
+    uint32_t fifo_index = (uint32_t) fifo_dequeue(error);
+    if (!fifo_index) return NULL;
+    return page_frame_info[fifo_index].paddr;
+
+}
 
 /* === Info structure to keep track on pages condition === */
 
@@ -189,10 +200,8 @@ to avoid race conditions.
  */
 void add_page_frame_to_free_list_info(uintptr_t *paddress) {
     // Convert 'address' to its corresponding index in the free_pages array
-    int index = ((uint32_t) paddress - PAGING_AREA_MIN_PADDR) / PAGE_SIZE;
-        if (!fifo_enqueue(index)) {
-        pr_debug("FIFO queue is full, cannot enqueue new page\n");
-    }
+    int index = calculate_info_index(paddress);
+
     page_frame_info_t* page_frame = &page_frame_info[index];
     // Prepend this page_frame to the start of the free list
     page_frame_info->next_free_page = page_free_head;
@@ -222,7 +231,8 @@ page_frame_info_t* remove_page_frame_from_free_list_info() {
 /*
  * "Hashing" function carrying physical page addresses into the info struct array 
  */
-uint32_t calculate_info_index(uintptr_t *paddr) {
+uint32_t calculate_info_index(uintptr_t *paddr) 
+{
     return ((uint32_t)paddr - PAGING_AREA_MIN_PADDR)/PAGE_SIZE;
 }
 
@@ -669,7 +679,8 @@ FIFO eviction algorithm
 uint32_t select_page_for_eviction() {
     int index = fifo_dequeue();
     if (index == -1) {
-        pr_debug("FIFO queue is empty, no page available for eviction\n");
+        pr_error("FIFO queue is empty, no page available for eviction\n");
+        abortk();
     }
     return (uintptr_t)page_frame_info[index].paddr;
 }
@@ -855,6 +866,32 @@ int check_dirty_traverse(uintptr_t *paddr) {
 }
 
 
+/*
+*  Returns a physical address to an evicted page frame
+*/
+uint32_t* evict_page()
+{
+    uintptr_t *page_frame_ref = NULL;      // physical page frame reference
+    uint32_t info_index;            // index into information structs array relating physical addresses to processes and the relevant virtual address
+    page_frame_info_t *frame_info;  // the retrieved information struct
+
+
+    while (page_frame_ref == NULL) {  
+        uintptr_t page_frame_ref = (uintptr_t* ) select_page_for_eviction();  // Get the physical address of the page to evict
+        if (!page_frame_ref) {
+            pr_debug("try_to_evict: No suitable page found for eviction\n");
+            return NULL;
+        }   
+
+        info_index = calculate_info_index(page_frame_ref);
+        frame_info = &page_frame_info[info_index];
+
+
+
+
+    }
+
+}
 
 
 // Attempts to find and evict a page
@@ -873,6 +910,9 @@ uint32_t* try_evict_page()
             return NULL;
         }   
 
+        if (!(frame_info -> info_mode & PE_INFO_PINNED)) {
+
+        }
         frameref = (uintptr_t *) evicted_page_physical;
         info_index = calculate_info_index(frameref);
         frame_info = &page_frame_info[info_index];
@@ -887,9 +927,10 @@ uint32_t* try_evict_page()
                 write_page_back_to_disk((uint32_t)frame_info->vaddr, frame_info->owner);
                 // Proceed to unmap the page
                 unmap_physical_page((uint32_t)frame_info->vaddr);
-                spinlock_acquire(&page_frame_info_lock);
-                add_page_frame_to_free_list_info(frame_info->paddr);
-                spinlock_release(&page_frame_info_lock);
+                //spinlock_acquire(&page_frame_info_lock);
+                //add_page_frame_to_free_list_info(frame_info->paddr);
+                page_free(frame_info -> paddr);
+                //spinlock_release(&page_frame_info_lock);
                 return frame_info->vaddr; 
             } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
