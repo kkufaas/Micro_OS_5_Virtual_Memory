@@ -500,12 +500,25 @@ dump_memory(char *title, uint32_t start, uint32_t end, uint32_t inclzero)
     }
 }
 
+/* Helper function to decode info_mode flags into a readable string. */
+const char* decode_info_mode(uint32_t info_mode) {
+    static char buffer[128];
+    buffer[0] = '\0';  // Initialize buffer to an empty string
+    
+    if (info_mode & PE_INFO_USER_MODE) strcat(buffer, "USER ");
+    if (info_mode & PE_INFO_KERNEL_DUMMY) strcat(buffer, "KERNEL ");
+    if (info_mode & PE_INFO_PINNED) strcat(buffer, "PINNED ");
+    
+    if (buffer[0] == '\0') return "NONE";
+    return buffer;
+}
+
 
 /* Prints a table of virtual and physical addresses for managed pages. */
 void print_page_table_info(void) {
     pr_debug("Page Table Info:\n");
-    pr_debug("%-5s | %-12s | %-15s | %-15s | %-10s\n", "Index", "Owner PID", "Virtual Addr", "Physical Addr", "Info Mode");
-    pr_debug("--------------------------------------------------------------------------\n");
+    pr_debug("%-5s | %-12s | %-15s | %-15s | %-20s\n", "Index", "Owner PID", "Virtual Addr", "Physical Addr", "Info Mode");
+    pr_debug("------------------------------------------------------------------------------------\n");
     
     for (int i = 0; i < PAGEABLE_PAGES; i++) {
         page_frame_info_t *info = &page_frame_info[i];
@@ -513,18 +526,40 @@ void print_page_table_info(void) {
         // Check if the page frame is used
         if (info->owner != NULL) {
             uint32_t owner_pid = info->owner->pid;  // Assuming the PCB structure has a PID field
-            pr_debug("%-5d | %-12u | 0x%013x | 0x%013x | 0x%08x\n", 
-                     i, owner_pid, (uint32_t)info->vaddr, (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12u | 0x%013x | 0x%013x | %-20s\n", 
+                     i, owner_pid, (uint32_t)info->vaddr, (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         } else if (info->next_free_page != NULL) {
             // If the page is free, indicate as such
-            pr_debug("%-5d | %-12s | %-15s | 0x%013x | 0x%08x\n", 
-                     i, "FREE NEXT", "", (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12s | %-15s | 0x%013x | %-20s\n", 
+                     i, "FREE NEXT", "", (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         } else {
             // The page is not used and not part of the free list
-            pr_debug("%-5d | %-12s | %-15s | 0x%013x | 0x%08x\n", 
-                     i, "UNUSED", "", (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12s | %-15s | 0x%013x | %-20s\n", 
+                     i, "UNUSED", "", (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         }
     }
+}
+
+/* Prints the contents of the FIFO queue, showing physical addresses in extended format. */
+void print_fifo_queue() {
+    if (fifo_is_empty()) {
+        pr_debug("FIFO Queue is empty.\n");
+        return;
+    }
+
+    int current = fifo_queue.front;
+    pr_debug("FIFO Queue contents (Page Indexes with Physical Addresses):\n");
+    pr_debug("Front -> ");
+    while (true) {
+        // Convert page index back to physical address for clarity, if needed
+        uint32_t physical_address = PAGING_AREA_MIN_PADDR + fifo_queue.queue[current] * PAGE_SIZE;
+        pr_debug("%d (Physical Address: 0x%011x) ", fifo_queue.queue[current], physical_address);
+        if (current == fifo_queue.rear) {
+            break;  // Reached the end of the queue
+        }
+        current = (current + 1) % PAGEABLE_PAGES;  // Move to the next index
+    }
+    pr_debug(" <- Rear\n");
 }
 
 
@@ -977,6 +1012,7 @@ uint32_t* try_evict_page()
  */
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
+    print_fifo_queue();
     uint32_t *fault_address = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
     //uint32_t error_code_decoded = error_code & (1 << 1) >> 1;
