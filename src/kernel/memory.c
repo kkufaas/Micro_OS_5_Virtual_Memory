@@ -545,6 +545,29 @@ void print_page_table_info(void) {
     }
 }
 
+/* Prints the contents of the FIFO queue, showing physical addresses in extended format. */
+void print_fifo_queue() {
+    if (fifo_is_empty()) {
+        pr_debug("FIFO Queue is empty.\n");
+        return;
+    }
+
+    int current = fifo_queue.front;
+    pr_debug("FIFO Queue contents (Page Indexes with Physical Addresses):\n");
+    pr_debug("Front -> ");
+    while (true) {
+        // Convert page index back to physical address for clarity, if needed
+        uint32_t physical_address = PAGING_AREA_MIN_PADDR + fifo_queue.queue[current] * PAGE_SIZE;
+        pr_debug("%d (Physical Address: 0x%011x) ", fifo_queue.queue[current], physical_address);
+        if (current == fifo_queue.rear) {
+            break;  // Reached the end of the queue
+        }
+        current = (current + 1) % PAGEABLE_PAGES;  // Move to the next index
+    }
+    pr_debug(" <- Rear\n");
+}
+
+
 
 /* === Page allocation tracking === */
 
@@ -930,6 +953,7 @@ uint32_t* try_evict_page()
 void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
     print_page_table_info();
+    print_fifo_queue();
     uint32_t *fault_address = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
     //uint32_t error_code_decoded = error_code & (1 << 1) >> 1;
