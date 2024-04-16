@@ -61,3 +61,10 @@ compile_commands.json
 # Documentation artifacts that are not supposed to appear in precode
 *.pptx
 src_only/
+
+
+# Editor stuff
+.vscode/*
+.vscode/
+src/.vscode/
+src/.vscode/*
