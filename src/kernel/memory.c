@@ -125,13 +125,12 @@ bool fifo_enqueue_info(uint32_t *paddr)
 }
 
 
-uint32_t* fife_dequeue_info() 
+uint32_t* fifo_dequeue_info() 
 {
     int error = 0;
     uint32_t fifo_index = (uint32_t) fifo_dequeue(error);
     if (!fifo_index) return NULL;
     return page_frame_info[fifo_index].paddr;
-
 }
 
 /* === Info structure to keep track on pages condition === */
