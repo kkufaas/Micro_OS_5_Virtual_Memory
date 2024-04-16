@@ -503,12 +503,25 @@ dump_memory(char *title, uint32_t start, uint32_t end, uint32_t inclzero)
     }
 }
 
+/* Helper function to decode info_mode flags into a readable string. */
+const char* decode_info_mode(uint32_t info_mode) {
+    static char buffer[128];
+    buffer[0] = '\0';  // Initialize buffer to an empty string
+    
+    if (info_mode & PE_INFO_USER_MODE) strcat(buffer, "USER ");
+    if (info_mode & PE_INFO_KERNEL_DUMMY) strcat(buffer, "KERNEL ");
+    if (info_mode & PE_INFO_PINNED) strcat(buffer, "PINNED ");
+    
+    if (buffer[0] == '\0') return "NONE";
+    return buffer;
+}
+
 
 /* Prints a table of virtual and physical addresses for managed pages. */
 void print_page_table_info(void) {
     pr_debug("Page Table Info:\n");
-    pr_debug("%-5s | %-12s | %-15s | %-15s | %-10s\n", "Index", "Owner PID", "Virtual Addr", "Physical Addr", "Info Mode");
-    pr_debug("--------------------------------------------------------------------------\n");
+    pr_debug("%-5s | %-12s | %-15s | %-15s | %-20s\n", "Index", "Owner PID", "Virtual Addr", "Physical Addr", "Info Mode");
+    pr_debug("------------------------------------------------------------------------------------\n");
     
     for (int i = 0; i < PAGEABLE_PAGES; i++) {
         page_frame_info_t *info = &page_frame_info[i];
@@ -516,20 +529,19 @@ void print_page_table_info(void) {
         // Check if the page frame is used
         if (info->owner != NULL) {
             uint32_t owner_pid = info->owner->pid;  // Assuming the PCB structure has a PID field
-            pr_debug("%-5d | %-12u | 0x%013x | 0x%013x | 0x%08x\n", 
-                     i, owner_pid, (uint32_t)info->vaddr, (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12u | 0x%013x | 0x%013x | %-20s\n", 
+                     i, owner_pid, (uint32_t)info->vaddr, (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         } else if (info->next_free_page != NULL) {
             // If the page is free, indicate as such
-            pr_debug("%-5d | %-12s | %-15s | 0x%013x | 0x%08x\n", 
-                     i, "FREE NEXT", "", (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12s | %-15s | 0x%013x | %-20s\n", 
+                     i, "FREE NEXT", "", (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         } else {
             // The page is not used and not part of the free list
-            pr_debug("%-5d | %-12s | %-15s | 0x%013x | 0x%08x\n", 
-                     i, "UNUSED", "", (uint32_t)info->paddr, info->info_mode);
+            pr_debug("%-5d | %-12s | %-15s | 0x%013x | %-20s\n", 
+                     i, "UNUSED", "", (uint32_t)info->paddr, decode_info_mode(info->info_mode));
         }
     }
 }
-
 
 
 /* === Page allocation tracking === */
