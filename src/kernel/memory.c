@@ -76,62 +76,6 @@ uint32_t calculate_info_index(uintptr_t *paddr);
 // idea from hashmaps: collisions only for physical
 // pages shared between different processes
 //
-/* === Info structure to keep track on fifo queue === */
-typedef struct {
-    uint32_t next_in, next_out;
-    uint32_t queue[PAGEABLE_PAGES];
-} FIFOQueue;
-
-static FIFOQueue fifo_queue;
-
-void fifo_init() {
-    //fifo_queue.front = -1;
-    //fifo_queue.rear = -1;
-
-    fifo_queue.next_in = 0;
-    fifo_queue.next_out = 0;
-}
-
-bool fifo_is_empty() {
-    return fifo_queue.next_in == fifo_queue.next_out;
-}
-
-bool fifo_is_full() {
-    return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
-}
-
-bool fifo_enqueue(uint32_t item) {
-    if (fifo_is_full()) {
-        return false;
-    }
-    fifo_queue.queue[fifo_queue.next_in] = item;
-    fifo_queue.next_in = (fifo_queue.next_in + 1) % PAGEABLE_PAGES;
-    return true;
-}
-
-uint32_t fifo_dequeue(int *error) {
-    if (fifo_is_empty()) {
-        *error = 1;  // Indicates queue is empty
-    }
-    uint32_t item = fifo_queue.queue[fifo_queue.next_out];
-    fifo_queue.next_out = (fifo_queue.next_out + 1) % PAGEABLE_PAGES;
-    return item;
-}
-
-
-bool fifo_enqueue_info(uint32_t *paddr)
-{
-    return fifo_enqueue(calculate_info_index(paddr));
-}
-
-
-uint32_t* fifo_dequeue_info() 
-{
-    int error = 0;
-    uint32_t fifo_index = (uint32_t) fifo_dequeue(error);
-    if (!fifo_index) return NULL;
-    return page_frame_info[fifo_index].paddr;
-}
 
 /* === Info structure to keep track on pages condition === */
 
@@ -281,6 +225,78 @@ page_frame_info_t* insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
         return info;
     }
 }
+
+
+
+
+/* === Info structure to keep track on fifo queue === */
+typedef struct {
+    uint32_t next_in, next_out;
+    uint32_t queue[PAGEABLE_PAGES];
+} FIFOQueue;
+
+static FIFOQueue fifo_queue;
+
+void fifo_init() {
+    //fifo_queue.front = -1;
+    //fifo_queue.rear = -1;
+
+    fifo_queue.next_in = 0;
+    fifo_queue.next_out = 0;
+}
+
+bool fifo_is_empty() {
+    return fifo_queue.next_in == fifo_queue.next_out;
+}
+
+bool fifo_is_full() {
+    return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
+}
+
+bool fifo_enqueue(uint32_t item) {
+    if (fifo_is_full()) {
+        return false;
+    }
+    fifo_queue.queue[fifo_queue.next_in] = item;
+    fifo_queue.next_in = (fifo_queue.next_in + 1) % PAGEABLE_PAGES;
+    return true;
+}
+
+uint32_t fifo_dequeue(int *error) {
+    if (fifo_is_empty()) {
+        *error = 1;  // Indicates queue is empty
+    }
+    uint32_t item = fifo_queue.queue[fifo_queue.next_out];
+    fifo_queue.next_out = (fifo_queue.next_out + 1) % PAGEABLE_PAGES;
+    return item;
+}
+
+
+bool fifo_enqueue_info(uint32_t *paddr)
+{
+    uint32_t info_index = calculate_info_index(paddr);
+    int pinned = page_frame_info[info_index].info_mode & PE_INFO_PINNED;
+    if (!pinned) {
+        return fifo_enqueue(calculate_info_index(paddr));
+    } else {
+        return false;
+    }
+
+}
+
+
+uint32_t* fifo_dequeue_info() 
+{
+    int error_empty_queue= 0;
+    uint32_t fifo_index = (uint32_t) fifo_dequeue(&error_empty_queue);
+    if (error_empty_queue) return NULL;
+    return page_frame_info[fifo_index].paddr;
+}
+
+
+
+
+
 
 
 
@@ -547,19 +563,19 @@ void print_fifo_queue() {
         return;
     }
 
-    int current = fifo_queue.front;
+    uint32_t current = fifo_queue.next_out;
     pr_debug("FIFO Queue contents (Page Indexes with Physical Addresses):\n");
-    pr_debug("Front -> ");
+    pr_debug("next_out -> ");
     while (true) {
         // Convert page index back to physical address for clarity, if needed
         uint32_t physical_address = PAGING_AREA_MIN_PADDR + fifo_queue.queue[current] * PAGE_SIZE;
-        pr_debug("%d (Physical Address: 0x%011x) ", fifo_queue.queue[current], physical_address);
-        if (current == fifo_queue.rear) {
+        pr_debug("%u (Physical Address: 0x%011x) ", fifo_queue.queue[current], physical_address);
+        if (current == fifo_queue.next_in) {
             break;  // Reached the end of the queue
         }
         current = (current + 1) % PAGEABLE_PAGES;  // Move to the next index
     }
-    pr_debug(" <- Rear\n");
+    pr_debug(" <- next_in\n");
 }
 
 
@@ -711,8 +727,10 @@ void init_memory(void)
 FIFO eviction algorithm
 */ 
 uint32_t select_page_for_eviction() {
-    int index = fifo_dequeue();
-    if (index == -1) {
+
+    int error_empty_queue = 0;
+    uint32_t index = fifo_dequeue(&error_empty_queue);
+    if (error_empty_queue) {
         pr_error("FIFO queue is empty, no page available for eviction\n");
         abortk();
     }
@@ -911,7 +929,7 @@ uint32_t* evict_page()
 
 
     while (page_frame_ref == NULL) {  
-        uintptr_t page_frame_ref = (uintptr_t* ) select_page_for_eviction();  // Get the physical address of the page to evict
+        page_frame_ref = (uintptr_t* ) select_page_for_eviction();  // Get the physical address of the page to evict
         if (!page_frame_ref) {
             pr_debug("try_to_evict: No suitable page found for eviction\n");
             return NULL;
