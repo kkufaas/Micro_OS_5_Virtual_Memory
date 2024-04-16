@@ -37,6 +37,7 @@
  */
 #define PAGE_SIZE 0x1000 // aka 4096 aka 4 KiB
 #define PAGEABLE_PAGES       33
+//#define PAGEABLE_PAGES 44
 //#define PAGEABLE_PAGES        500
 #define PAGING_AREA_MIN_PADDR 0x100000 /* 1MB */
 #define PAGING_AREA_MAX_PADDR \

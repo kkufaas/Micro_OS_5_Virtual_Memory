@@ -169,13 +169,15 @@ void initialize_page_frame_infos(void) {
     set_frame_info(page_frame_info[0], NULL, NULL, (uintptr_t *) paddr, NULL, 0);
     set_frame_info(page_frame_info_shared[0], NULL, NULL, NULL, NULL, 0);
 
-    for (int i = 1; i < PAGEABLE_PAGES - 1; i++) {
+    for (int i = 1; i < PAGEABLE_PAGES; i++) {
         paddr += PAGE_SIZE;
         set_frame_info(page_frame_info[i], NULL, NULL, (uintptr_t *) (paddr), NULL, 0);
         set_frame_info(page_frame_info_shared[i], NULL, NULL, NULL, NULL, 0);
 
         page_frame_info[i - 1].next_free_page = &page_frame_info[i];
     }
+
+    page_frame_info[PAGEABLE_PAGES].next_free_page = NULL;
 }
 
 /*
@@ -553,12 +555,13 @@ static uint32_t *kernel_pdir;
  * - is_user: Flag indicating whether the mappings should be set up for user mode (non-zero) or kernel mode (zero).
  */
 
-static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
+static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user) {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Define access mode for user pages.
-    uint32_t kernel_mode = PE_P | PE_RW | PE_US; // Define access mode for kernel pages.
+    uint32_t kernel_mode = PE_P | PE_RW; // Define access mode for kernel pages.
 
     uint32_t *kernel_ptable = allocate_page();
-    insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb, PE_INFO_PINNED);
+    //insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb, PE_INFO_PINNED);
+    insert_page_frame_info(kernel_ptable, kernel_ptable, pcb, PE_INFO_PINNED);
     
 
 
@@ -574,8 +577,9 @@ static void setup_kernel_vmem_common(uint32_t *pdir, int is_user) {
         table_map_page(kernel_ptable, paddr, paddr, kernel_mode);
         dir_ins_table(pdir, paddr, kernel_ptable, kernel_mode);
     }
-
     dir_ins_table(pdir, 0, kernel_ptable, kernel_mode);
+
+
     // Map the video memory from 0xB8000 to 0xB8FFF.
     int mode = (is_user ? user_mode : kernel_mode);
     pr_debug("user mode ?? %d\n", mode & PE_US);
@@ -592,7 +596,7 @@ static void setup_kernel_vmem(void) {
     lock_acquire(&page_map_lock);
     kernel_pdir = allocate_page();
     insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
-    setup_kernel_vmem_common(kernel_pdir, 0);
+    setup_kernel_vmem_common(dummy_kernel_pcb, kernel_pdir, 0);
     lock_release(&page_map_lock);
 }
 
@@ -601,8 +605,6 @@ static void setup_kernel_vmem(void) {
  Sets up a page directory and page table for a new process or thread.
  */
 void setup_process_vmem(pcb_t *p) {
-    uint32_t *proc_pdir = allocate_page();
-    uint32_t user_mode = PE_RW | PE_US;
 
     // basically same as P4-precode
     lock_acquire(&page_map_lock);
@@ -611,13 +613,16 @@ void setup_process_vmem(pcb_t *p) {
         pr_debug("setup thread vmem done\n");
         lock_release(&page_map_lock);
         return;
-    } else {
-        // Ensure the kernel's virtual address space is consistently mapped into 
-        // the virtual address space of every process. The kernel needs to be accessible
-        // at all times to handle interrupts since the CPU only sees virtual addresses.
-        // It is important that flags make the addresses not accessible by the user
-        setup_kernel_vmem_common(proc_pdir, 1);
     }
+
+    uint32_t *proc_pdir = allocate_page();
+    uint32_t user_mode = PE_RW | PE_US;
+
+    // Ensure the kernel's virtual address space is consistently mapped into 
+    // the virtual address space of every process. The kernel needs to be accessible
+    // at all times to handle interrupts since the CPU only sees virtual addresses.
+    // It is important that flags make the addresses not accessible by the user
+    setup_kernel_vmem_common(p, proc_pdir, 1);
 
     // Allocate and setup a page table for the process's specific memory (code and data segments)
     uint32_t *proc_ptable = allocate_page();
