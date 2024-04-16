@@ -37,6 +37,8 @@
 
 static pcb_t dummy_kernel_pcb[1]; 
 
+static uint32_t pinned_page_frames = 0;
+
 enum {
     PE_INFO_USER_MODE              = 1 << 0,     /* user */
     PE_INFO_KERNEL_DUMMY           = 1 << 1,     /* kernel ''dummy'' */
@@ -189,6 +191,8 @@ page_frame_info_t* insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
     uint32_t index = calculate_info_index(paddr);
     page_frame_info_t *info = &page_frame_info[index];
 
+
+
     // If the page frame is already occupied, manage the shared info structure.
     if (info->owner) {
         pr_debug("Shared page at physical address %u, already occupied by PID %u", 
@@ -226,13 +230,19 @@ page_frame_info_t* insert_page_frame_info(uintptr_t *paddr, uintptr_t *vaddr,
     }
 }
 
-
+static spinlock_t pinned_pages_counter_lock = SPINLOCK_INIT;
+void inc_pinned_pages(int increment) {
+    spinlock_acquire(&pinned_pages_counter_lock);
+    pinned_page_frames += increment;
+    spinlock_release(&pinned_pages_counter_lock);
+}
 
 
 /* === Info structure to keep track on fifo queue === */
 typedef struct {
     uint32_t next_in, next_out;
     uint32_t queue[PAGEABLE_PAGES];
+    uint32_t items;
 } FIFOQueue;
 
 static FIFOQueue fifo_queue;
@@ -243,14 +253,17 @@ void fifo_init() {
 
     fifo_queue.next_in = 0;
     fifo_queue.next_out = 0;
+    fifo_queue.items = 0;
 }
 
 bool fifo_is_empty() {
-    return fifo_queue.next_in == fifo_queue.next_out;
+    //return fifo_queue.next_in == fifo_queue.next_out;
+    return fifo_queue.items == 0;
 }
 
 bool fifo_is_full() {
-    return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
+    //return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
+    return fifo_queue.items == PAGEABLE_PAGES - pinned_page_frames;
 }
 
 bool fifo_enqueue(uint32_t item) {
@@ -259,6 +272,7 @@ bool fifo_enqueue(uint32_t item) {
     }
     fifo_queue.queue[fifo_queue.next_in] = item;
     fifo_queue.next_in = (fifo_queue.next_in + 1) % PAGEABLE_PAGES;
+    fifo_queue.items++;
     return true;
 }
 
@@ -268,20 +282,20 @@ uint32_t fifo_dequeue(int *error) {
     }
     uint32_t item = fifo_queue.queue[fifo_queue.next_out];
     fifo_queue.next_out = (fifo_queue.next_out + 1) % PAGEABLE_PAGES;
+
     return item;
 }
 
 
-bool fifo_enqueue_info(uint32_t *paddr)
+void fifo_enqueue_info(uint32_t *paddr)
 {
     uint32_t info_index = calculate_info_index(paddr);
     int pinned = page_frame_info[info_index].info_mode & PE_INFO_PINNED;
     if (!pinned) {
-        return fifo_enqueue(calculate_info_index(paddr));
+        fifo_enqueue(info_index);
     } else {
-        return false;
+        inc_pinned_pages(1);
     }
-
 }
 
 
@@ -289,16 +303,11 @@ uint32_t* fifo_dequeue_info()
 {
     int error_empty_queue= 0;
     uint32_t fifo_index = (uint32_t) fifo_dequeue(&error_empty_queue);
-    if (error_empty_queue) return NULL;
+    if (error_empty_queue) {
+        return NULL;
+    }
     return page_frame_info[fifo_index].paddr;
 }
-
-
-
-
-
-
-
 
 
 /*
@@ -559,23 +568,25 @@ void print_page_table_info(void) {
 /* Prints the contents of the FIFO queue, showing physical addresses in extended format. */
 void print_fifo_queue() {
     if (fifo_is_empty()) {
-        pr_debug("FIFO Queue is empty.\n");
+        pr_debug("print_fifo_queue: FIFO Queue is empty.\n");
         return;
     }
 
     uint32_t current = fifo_queue.next_out;
-    pr_debug("FIFO Queue contents (Page Indexes with Physical Addresses):\n");
-    pr_debug("next_out -> ");
+    uint32_t* current_paddr;
+    pr_debug("print_fifo_queue: FIFO Queue contents (Page Indexes with Physical Addresses):\n\n");
+    pr_debug("print_fifo_queue: next_out -> ");
     while (true) {
         // Convert page index back to physical address for clarity, if needed
-        uint32_t physical_address = PAGING_AREA_MIN_PADDR + fifo_queue.queue[current] * PAGE_SIZE;
-        pr_debug("%u (Physical Address: 0x%011x) ", fifo_queue.queue[current], physical_address);
+        current_paddr = page_frame_info[fifo_queue.queue[current]].paddr;
+        //uint32_t physical_address = PAGING_AREA_MIN_PADDR + fifo_queue.queue[current] * PAGE_SIZE;
+        pr_debug("print_fifo_queue: %u (Physical Address: 0x%p) \n", fifo_queue.queue[current], current_paddr);
         if (current == fifo_queue.next_in) {
             break;  // Reached the end of the queue
         }
         current = (current + 1) % PAGEABLE_PAGES;  // Move to the next index
     }
-    pr_debug(" <- next_in\n");
+    pr_debug("print_fifo_queue: <- next_in\n\n\n");
 }
 
 
@@ -608,9 +619,7 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user) {
     uint32_t *kernel_ptable = allocate_page();
     //insert_page_frame_info(kernel_ptable, kernel_ptable, dummy_kernel_pcb, PE_INFO_PINNED);
     insert_page_frame_info(kernel_ptable, kernel_ptable, pcb, PE_INFO_PINNED);
-    
-
-
+    inc_pinned_pages(1);
 
     // Identity map the entire kernel region.
     for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
@@ -642,6 +651,7 @@ static void setup_kernel_vmem(void) {
     lock_acquire(&page_map_lock);
     kernel_pdir = allocate_page();
     insert_page_frame_info(kernel_pdir, kernel_pdir, dummy_kernel_pcb, info_mode);
+    inc_pinned_pages(1);
     setup_kernel_vmem_common(dummy_kernel_pcb, kernel_pdir, 0);
     lock_release(&page_map_lock);
 }
@@ -666,7 +676,8 @@ void setup_process_vmem(pcb_t *p) {
 
     // Ensure the kernel's virtual address space is consistently mapped into 
     // the virtual address space of every process. The kernel needs to be accessible
-    // at all times to handle interrupts since the CPU only sees virtual addresses.
+    // at all times to handle interrupts since the CPU only sees virtual addresses
+    // because the MMU sits between the CPU and the main memory.
     // It is important that flags make the addresses not accessible by the user
     setup_kernel_vmem_common(p, proc_pdir, 1);
 
@@ -674,6 +685,7 @@ void setup_process_vmem(pcb_t *p) {
     uint32_t *proc_ptable = allocate_page();
     insert_page_frame_info(proc_ptable, proc_ptable, p, PE_INFO_PINNED);
     insert_page_frame_info(proc_pdir, proc_pdir, p, PE_INFO_PINNED);
+    inc_pinned_pages(2);
 
 
     /*
@@ -820,21 +832,15 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
     pr_debug("load_page_from_disk: Calculated swap size %u \n", pcb->swap_size);
 
     // Check if the disk offset exceeds the allocated swap size
-    if (disk_offset >= pcb->swap_size * (PAGE_SIZE / SECTOR_SIZE)) {
-        pr_error("load_page_from_disk: Virtual address %p is beyond swap area (disk offset %u, swap size %u) for PID %u\n", (void *)vaddr, disk_offset, pcb->swap_size, pcb->pid);
-        uint32_t *evicted_page_vaddr = try_evict_page();
-        if (evicted_page_vaddr == NULL) {
-            pr_error("load_page_from_disk: No page available for eviction, cannot allocate memory for PID %u\n", pcb->pid);
-        return -1;
-    }
-    pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
-    }
-    //pr_debug("load_page_from_disk: Final disk location to read from is %u sectors\n", disk_loc);
-    //int success = -1;
-    //uint32_t disk_offset = (vaddr - PROCESS_VADDR) / PAGE_SIZE;
-    //disk_offset *= (PAGE_SIZE/SECTOR_SIZE);
-
-    //pr_debug("load_page_from_disk: Calculated disk offset %u, swap size %u\n", disk_offset, pcb->swap_size);
+    // if (disk_offset >= pcb->swap_size * (PAGE_SIZE / SECTOR_SIZE)) {
+    //     pr_error("load_page_from_disk: Virtual address %p is beyond swap area (disk offset %u, swap size %u) for PID %u\n", (void *)vaddr, disk_offset, pcb->swap_size, pcb->pid);
+    //     uint32_t *evicted_page_vaddr = try_evict_page();
+    //     if (evicted_page_vaddr == NULL) {
+    //         pr_error("load_page_from_disk: No page available for eviction, cannot allocate memory for PID %u\n", pcb->pid);
+    //     return -1;
+    // }
+    // pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
+    // }
 
     uint32_t info_mode;
     uint32_t mode = PE_P | PE_RW;
@@ -857,15 +863,16 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
 
 
     uint32_t *frameref = allocate_page();
-    if (!frameref) {
-        uint32_t *evicted_page_vaddr = try_evict_page();
-        if (!evicted_page_vaddr) {
-            pr_error("load_page_from_disk: Unable to allocate or evict a frame for PID %u\n", pcb->pid);
-            return -1;
-        }
-        frameref = evicted_page_vaddr; // Assume the physical address returned is ready for reuse
-        pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
-    }
+    // if (!frameref) {
+    //     uint32_t *evicted_page_vaddr = try_evict_page();
+    //     if (!evicted_page_vaddr) {
+    //         pr_error("load_page_from_disk: Unable to allocate or evict a frame for PID %u\n", pcb->pid);
+    //         return -1;
+    //     }
+    //     frameref = evicted_page_vaddr; // Assume the physical address returned is ready for reuse
+    //     pr_debug("load_page_from_disk: Evicted page %p to make space for new allocation\n", evicted_page_vaddr);
+    // }
+
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     //int block_count = PAGE_SIZE / SECTOR_SIZE;
@@ -873,14 +880,15 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb, uint32_t *fault_dir)
         //pr_debug("reducing block count for reading\n");
         block_count = (pcb->swap_loc + pcb->swap_size) - disk_loc;
     }
-    insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
+    //insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, PE_INFO_USER_MODE);
+    insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode);
     int success = scsi_read(disk_loc, block_count, (void *) frameref);
     if (success < 0) {
         pr_debug("load_page_from_disk: Failed to read from disk sector %u\n", disk_loc);
         return success;
     }
     pr_debug("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x\n", vaddr, (uint32_t) frameref);
-    fifo_enqueue((uint32_t)frameref); 
+    fifo_enqueue_info(frameref); 
     return success; 
 }
 
