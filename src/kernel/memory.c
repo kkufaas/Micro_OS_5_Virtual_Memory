@@ -58,6 +58,7 @@ enum {
 
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock   = SPINLOCK_INIT;
+
 static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 static spinlock_t fifo_alloc_lock      = SPINLOCK_INIT;
 
@@ -180,6 +181,7 @@ page_frame_info_t *remove_page_frame_from_free_list_info()
 {
     if (page_free_head == NULL) {
         // No free page frames available
+        pr_error("remove_page_frame_from_free_list_info: tried to remove info struct from empty free list");
         return NULL;
     }
     // Take the first page frame from the free list
