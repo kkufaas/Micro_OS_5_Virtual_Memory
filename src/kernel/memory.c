@@ -60,7 +60,7 @@ static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock   = SPINLOCK_INIT;
 
 static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
-static spinlock_t fifo_alloc_lock      = SPINLOCK_INIT;
+//static spinlock_t fifo_alloc_lock      = SPINLOCK_INIT;
 
 inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t       *get_page_table(uint32_t vaddr, uint32_t *page_directory);
@@ -629,6 +629,42 @@ void print_page_table_info(void)
 
 /* Prints the contents of the FIFO queue, showing physical addresses in
  * extended format. */
+// void print_fifo_queue()
+// {
+//     if (fifo_is_empty()) {
+//         pr_debug("print_fifo_queue: FIFO Queue is empty.\n");
+//         return;
+//     }
+
+//     uint32_t  current = fifo_queue.next_out;
+//     uint32_t *current_paddr;
+//     pr_debug(
+//             "print_fifo_queue: FIFO Queue contents (Page Indexes with "
+//             "Physical Addresses):\n\n"
+//     );
+//     pr_debug("print_fifo_queue: first below next_out ---> \n");
+//     while (true) {
+//         // Convert page index back to physical address for clarity, if
+//         // needed
+//         current_paddr = page_frame_info[fifo_queue.queue[current]].paddr;
+//         // uint32_t physical_address = PAGING_AREA_MIN_PADDR +
+//         // fifo_queue.queue[current] * PAGE_SIZE;
+//         pr_debug(
+//                 "print_fifo_queue: %u (Physical Address: 0x%p) \n",
+//                 fifo_queue.queue[current], current_paddr
+//         );
+//         if (current == fifo_queue.next_in) {
+//             break; // Reached the end of the queue
+//         }
+//         current = (current + 1) % PAGEABLE_PAGES; // Move to the next index
+//     }
+//     pr_debug("print_fifo_queue: <--- next_in first above\n\n\n");
+// }
+
+/* Prints the contents of the FIFO queue, showing physical addresses in
+ * extended format. */
+/* Prints the contents of the FIFO queue, showing physical addresses in
+ * extended format and marking the positions of next_in and next_out. */
 void print_fifo_queue()
 {
     if (fifo_is_empty()) {
@@ -636,30 +672,36 @@ void print_fifo_queue()
         return;
     }
 
-    uint32_t  current = fifo_queue.next_out;
-    uint32_t *current_paddr;
-    pr_debug(
-            "print_fifo_queue: FIFO Queue contents (Page Indexes with "
-            "Physical Addresses):\n\n"
-    );
-    pr_debug("print_fifo_queue: first below next_out ---> \n");
-    while (true) {
-        // Convert page index back to physical address for clarity, if
-        // needed
-        current_paddr = page_frame_info[fifo_queue.queue[current]].paddr;
-        // uint32_t physical_address = PAGING_AREA_MIN_PADDR +
-        // fifo_queue.queue[current] * PAGE_SIZE;
-        pr_debug(
-                "print_fifo_queue: %u (Physical Address: 0x%p) \n",
-                fifo_queue.queue[current], current_paddr
-        );
+    uint32_t current = fifo_queue.next_out;
+    pr_debug("print_fifo_queue: FIFO Queue contents:\n");
+    pr_debug("Index | Physical Address      | Position\n");
+    pr_debug("----------------------------------------\n");
+
+    do {
+        // Convert page index back to physical address for clarity, if needed
+        uint32_t paddr_index = fifo_queue.queue[current];
+        uintptr_t *current_paddr = page_frame_info[paddr_index].paddr;
+
+        // Determine if the current index is next_out or next_in
+        const char *position = "";
+        if (current == fifo_queue.next_out) {
+            position = "next_out";
+        } 
         if (current == fifo_queue.next_in) {
-            break; // Reached the end of the queue
+            position = (strcmp(position, "next_out") == 0) ? "next_out, next_in" : "next_in";
         }
-        current = (current + 1) % PAGEABLE_PAGES; // Move to the next index
-    }
-    pr_debug("print_fifo_queue: <--- next_in first above\n\n\n");
+
+        pr_debug("%5d | 0x%016x | %s\n", current, (uint32_t)current_paddr, position);
+
+        if (current == fifo_queue.next_in) {
+            break; // If current has reached rear, break the loop
+        }
+        current = (current + 1) % PAGEABLE_PAGES; // Cycle through the queue
+    } while (current != fifo_queue.next_out);
+
+    pr_debug("----------------------------------------\n\n");
 }
+
 
 /* === Page allocation tracking === */
 
@@ -1218,32 +1260,23 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
     uint32_t *fault_address   = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
     invalidate_page(fault_address);
-    // uint32_t error_code_decoded = error_code & (1 << 1) >> 1;
-
     pcb_t *fault_pcb = current_running;
 
     if (MEMDEBUG) {
-        /* clang-format off */
         pr_debug("\n\n\n\n\n\n\n");
-        pr_debug("page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7 );
+        pr_debug("page_fault_handler: Handling new page fault: error code: %u \n", error_code & 0x7);
         pr_debug("page_fault_handler: pid: %u \n", fault_pcb->pid);
         pr_debug("page_fault_handler: write op? %u \n", (error_code & (1 << 1)) >> 1);
 
         print_fifo_queue();
         print_page_table_info();
 
-        // pr_debug("page_fault_handler: interrupt stack frame -> instruction pointer ip:    %p \n", (uintptr_t *) stack_frame->ip);
-        // pr_debug("page_fault_handler: interrupt stack frame -> code segment selector cs:  %p \n", (uintptr_t *) stack_frame->cs);
-        // pr_debug("page_fault_handler: interrupt stack frame -> stack pointer sp:          %p \n", (uintptr_t *) stack_frame->sp);
-        // pr_debug("page_fault_handler: interrupt stack frame -> stack segment selector ss: %p \n", (uintptr_t *) stack_frame->ss);
-
-        pr_debug("page_fault_handler: fault address: %p \n", fault_address);
-        pr_debug("page_fault_handler: fault directory %p \n", fault_directory);
-        pr_debug("page_fault_handler: fault_pcb -> page_directory %p \n", fault_pcb->page_directory);
-        /* clang-format on */
+        pr_debug("page_fault_handler: fault address: 0x%013x \n", (uint32_t)fault_address);
+        pr_debug("page_fault_handler: fault directory 0x%013x \n", (uint32_t)fault_directory);
+        pr_debug("page_fault_handler: fault_pcb -> page_directory 0x%013x \n", (uint32_t)fault_pcb->page_directory);
 
         print_pcb_table();
-        pr_debug("PAGING_AREA_MAX_PADDR = 0x%08x\n", PAGING_AREA_MAX_PADDR);
+        pr_debug("PAGING_AREA_MAX_PADDR = 0x%013x\n", PAGING_AREA_MAX_PADDR);
     }
     nointerrupt_leave();
 
