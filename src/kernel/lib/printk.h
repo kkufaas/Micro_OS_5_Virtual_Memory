@@ -14,11 +14,11 @@
 
 enum log_level {
     LOG_ERROR = 0,
+    LOG_LOG,
     LOG_DUMP,
     LOG_WARN,
     LOG_INFO,
     LOG_DEBUG,
-    LOG_LOG,
     LOG_SKIP, // Print with this log level to never print
 };
 

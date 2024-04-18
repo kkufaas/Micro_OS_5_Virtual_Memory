@@ -59,7 +59,7 @@ enum {
 static uintptr_t  next_free_mem;
 static spinlock_t next_free_mem_lock   = SPINLOCK_INIT;
 
-static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
+//static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 //static spinlock_t fifo_alloc_lock      = SPINLOCK_INIT;
 
 inline uint32_t get_table_index(uint32_t vaddr);
@@ -181,7 +181,6 @@ page_frame_info_t *remove_page_frame_from_free_list_info()
 {
     if (page_free_head == NULL) {
         // No free page frames available
-        pr_error("remove_page_frame_from_free_list_info: tried to remove info struct from empty free list");
         return NULL;
     }
     // Take the first page frame from the free list
@@ -356,7 +355,7 @@ uint32_t *fifo_dequeue_info()
 uint32_t *allocate_page_internal()
 {
     uint32_t *paddr = NULL;
-    spinlock_acquire(&page_frame_info_lock);
+    //spinlock_acquire(&page_frame_info_lock);
     page_frame_info_t *page_info_frame =
             remove_page_frame_from_free_list_info();
 
@@ -367,7 +366,7 @@ uint32_t *allocate_page_internal()
             *(paddr + i) = 0;
         }
     }
-    spinlock_release(&page_frame_info_lock);
+    //spinlock_release(&page_frame_info_lock);
     return paddr;
 }
 
@@ -419,9 +418,9 @@ void page_free(uintptr_t *paddr, int evict)
     page_frame_info_t *info_frame, *next_shared_info;
 
     if (!evict) {
-        spinlock_acquire(&page_frame_info_lock);
+        //spinlock_acquire(&page_frame_info_lock);
         add_page_frame_to_free_list_info(paddr);
-        spinlock_release(&page_frame_info_lock);
+        //spinlock_release(&page_frame_info_lock);
     }
 
     uint32_t info_index = calculate_info_index(paddr);
@@ -969,6 +968,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
      * of sectors.
      */
 
+
+
     uint32_t *fault_dir, *frameref_table, *frameref, disk_offset, block_count;
     uint32_t  info_mode, mode, disk_loc;
 
@@ -996,11 +997,14 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         mode |= PE_US;
     }
 
+    lock_acquire(&page_map_lock);
+
     // Attempt to allocate or find a free page
     frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
         // no table exists in page dir with the virtual address
         // allocate new page table and insert into page directory
+        //lock_acquire(&page_map_lock);
         frameref_table = allocate_page();
         insert_page_frame_info(
                 frameref_table, (uintptr_t *) vaddr, pcb,
@@ -1008,8 +1012,10 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         );
         inc_pinned_pages(1);
         dir_ins_table(fault_dir, vaddr, frameref_table, mode);
+        //lock_release(&page_map_lock);
     }
 
+    //lock_acquire(&page_map_lock);
     if (!(frameref = allocate_page())) {
         nointerrupt_enter();
         pr_error(
@@ -1020,12 +1026,11 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         abortk();
     }
     fifo_enqueue_info(frameref);
-
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode);
-
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
 
+    lock_release(&page_map_lock);
     int success = scsi_read(disk_loc, block_count, (void *) frameref);
     if (success < 0) {
         pr_error(
@@ -1268,8 +1273,11 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
             }
         }
 
-        lock_acquire(&page_map_lock);
+        //lock_acquire(&page_map_lock);
         int success = load_page_from_disk((uint32_t) fault_address, fault_pcb);
+
+        
+        lock_acquire(&page_map_lock);
         set_page_directory(fault_pcb->page_directory);
         lock_release(&page_map_lock);
 
