@@ -68,6 +68,8 @@ src_only/
 .vscode/
 src/.vscode/
 src/.vscode/*
+./src/.vscode/
+./src/.vscode/*
 
 .cache/
 .cache/*
