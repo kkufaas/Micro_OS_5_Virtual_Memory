@@ -18,6 +18,7 @@ enum log_level {
     LOG_WARN,
     LOG_INFO,
     LOG_DEBUG,
+    LOG_LOG,
     LOG_SKIP, // Print with this log level to never print
 };
 
@@ -52,6 +53,7 @@ int vkprintf(enum log_level lvl, const char *fmt, va_list args);
 #define pr_warn(fmt, ...)  printk(LOG_WARN, fmt, ##__VA_ARGS__)
 #define pr_info(fmt, ...)  printk(LOG_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...) printk(LOG_DEBUG, fmt, ##__VA_ARGS__)
+#define pr_log(fmt, ...) printk(LOG_LOG, fmt, ##__VA_ARGS__)
 #define pr_never(fmt, ...) printk(INT_MAX, fmt, ##__VA_ARGS__)
 
 #endif /* PRINTK_H */
