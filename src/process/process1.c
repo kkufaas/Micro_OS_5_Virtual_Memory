@@ -174,7 +174,6 @@ int main(void)
         draw_plane(plane_x, plane_y);
 
         bullet_logic(&bullet, plane_x, plane_y);
-
         ms_delay(DELAY_MS);
     }
 

@@ -1023,8 +1023,6 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb)
 char read_buffer[PAGE_SIZE];
 lock_t read_buffer_lock = LOCK_INIT;
 
-
-
 int disk_loader(int disk_loc, int block_count, uint32_t *frameref) {
 
     lock_acquire(&read_buffer_lock);
@@ -1044,8 +1042,6 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
      * pcb-> swap_loc is sector number on disk, pcb -> swap_size is number
      * of sectors.
      */
-
-
 
     uint32_t *fault_dir, *frameref_table, *frameref, disk_offset, block_count;
     uint32_t  info_mode, mode, disk_loc;
@@ -1078,7 +1074,11 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     }
 
     int success = -1;
-    if ( !(frameref = allocate_page()) ) {
+    lock_acquire(&page_map_lock);
+    frameref  = allocate_page();
+    lock_release(&page_map_lock);
+
+    if (!frameref) {
         nointerrupt_enter();
         pr_error(
                 "load_page_from_disk: could not allocate new page... "
@@ -1090,6 +1090,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         success = disk_loader(disk_loc, block_count, frameref);
     }
 
+    lock_acquire(&page_map_lock);
     //lock_acquire(&page_map_lock);
     // Attempt to allocate or find a free page
     frameref_table = get_page_table(vaddr, fault_dir);
@@ -1118,21 +1119,22 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         return success;
     }
 
-    nointerrupt_enter();
-    pr_log(
-            "load_page_from_disk: Loaded page at virtual address 0x%08x "
-            "from "
-            "disk into physical address 0x%08x\n",
-            vaddr, (uint32_t) frameref
-    );
-    nointerrupt_leave();
 
-    //lock_acquire(&page_map_lock);
     fifo_enqueue_info(frameref);
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode);
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
-    //lock_release(&page_map_lock);
+    set_page_directory(pcb->page_directory);
+    lock_release(&page_map_lock);
+
+    nointerrupt_enter();
+    pr_log(
+            "load_page_from_disk: Loaded page at virtual address 0x%08x "
+            "from disk into physical address 0x%08x for pid = %u\n",
+            vaddr, (uint32_t) frameref, pcb -> pid
+    );
+    nointerrupt_leave();
+
 
     return success;
 }
@@ -1328,7 +1330,8 @@ inline void log_interrupt_frame(struct interrupt_frame *stack_frame)
 #define ec_page_not_present(error_code)    !((error_code) & 0x1)
 #define ec_privilige_violation(error_code) ((error_code) & 0x1)
 
-
+// control wether multiple page faults should be handled at once or queued up
+lock_t page_fault_debug_lock = LOCK_INIT;
 
 /*
  * Handle page fault
@@ -1382,11 +1385,10 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         //lock_acquire(&page_map_lock);
 
         nointerrupt_leave();
-        
-        lock_acquire(&page_map_lock);
+
+        lock_acquire(&page_fault_debug_lock);
         int success = load_page_from_disk((uint32_t) fault_address, fault_pcb);
-        set_page_directory(fault_pcb->page_directory);
-        lock_release(&page_map_lock);
+        lock_release(&page_fault_debug_lock);
 
         nointerrupt_enter();
         if (success >= 0) {
@@ -1404,6 +1406,5 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
         todo_use(error_code);
         todo_use(page_map_lock);
         todo_abort();
-        nointerrupt_enter();
     }
 }
