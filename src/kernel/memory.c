@@ -73,7 +73,6 @@ uint32_t        calculate_info_index(uintptr_t *paddr);
 inline uint32_t get_directory_index(uint32_t vaddr);
 void unmap_physical_page(uint32_t *process_directory, uint32_t vaddr);
 void print_page_table_info(void);
-void fifo_cleanup_done_process(pcb_t *p);
 void print_fifo_queue();
 
 ///////////////////////////////////////////////////////
@@ -300,38 +299,6 @@ void fifo_init()
 }
 
 
-// remember to wrap in page_map_lock
-void fifo_cleanup_done_process(pcb_t *p)
-{
-    uint32_t info_index, next_in, next_out, k, buffer_next_in;
-    uint32_t fifobuffer[PAGEABLE_PAGES];
-
-    // copy the fifo queue into the buffer, but filter out the
-    // done process
-    next_out = fifo_queue.next_out;
-    next_in = next_out;
-    buffer_next_in = next_in;
-    for (k = 0; k < PAGEABLE_PAGES; k++) {
-        info_index = fifo_queue.queue[next_in];
-        if (page_frame_info[info_index].owner != p) {
-            fifobuffer[buffer_next_in] = fifo_queue.queue[next_in];
-            buffer_next_in = (buffer_next_in + 1) % PAGEABLE_PAGES;
-            assertk(page_frame_info[info_index].info_mode & PE_INFO_PINNED != 0);
-        }
-        next_in = (next_in + 1) % PAGEABLE_PAGES;
-
-        pr_log("buffer_next_in = %u,        next_in = %u\n", buffer_next_in, next_in);
-    }
-
-    // copy fifobuffer back to fifo_queue.queue and update next_in
-    // fifo_queue.next_out stays the same
-    for (k = 0; k < PAGEABLE_PAGES; k++) {
-        fifo_queue.queue[k] = fifobuffer[k];
-    }
-    fifo_queue.next_in = buffer_next_in;
-
-    print_fifo_queue();
-}
 
 
 
@@ -472,12 +439,6 @@ void page_free(uintptr_t *paddr, int evict)
 {
     page_frame_info_t *info_frame, *next_shared_info;
 
-    // if (!evict) {
-    //     //spinlock_acquire(&page_frame_info_lock);
-    //     add_page_frame_to_free_list_info(paddr);
-    //     //spinlock_release(&page_frame_info_lock);
-    // }
-
     uint32_t info_index = calculate_info_index(paddr);
     info_frame          = &page_frame_info[info_index];
 
@@ -517,18 +478,20 @@ void page_free(uintptr_t *paddr, int evict)
 
 void free_done_process_memory(pcb_t *p) 
 {
-    // the quick and dirty way - linear search through entire pageable area
-    uint32_t *paddr;
+    // the quick and dirty way - linear search through entire pageable area,
+    // mark all pages belonging to this process as not pinned.
     lock_acquire(&page_map_lock);
-    fifo_cleanup_done_process(p);
     for (int i=0; i < PAGEABLE_PAGES; i++) {
         if (page_frame_info[i].owner == p) {
-            paddr = page_frame_info[i].paddr;
-            page_free(paddr, 0);
-            pr_debug("free_done_process_memory: freeing done process, next_free_page = %p \n", page_frame_info[i].next_free_page);
+            // put pinned pages to the fifo-queue so that they become available
+            // for paging/swapping.
+            if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
+                fifo_enqueue(i);
+            }
+            // unpin the page frame, page fault handler can now swap it when added to the fifo queue
+            page_frame_info[i].info_mode &=~(PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY | PE_INFO_USER_MODE);
         }
     }
-    print_page_table_info();
     lock_release(&page_map_lock);
 }
 
