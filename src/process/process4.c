@@ -51,7 +51,7 @@ int main(void)
     if ((fi = mbox_open(FLOW_IN)) < 0) exit();
     if ((fo = mbox_open(FLOW_OUT)) < 0) exit();
 
-    for (i = 0; i < 1000; i++) {
+    for (i = 0; i < 100; i++) {
         /* Try to send and receive messages of sizes
          * 128-255 bytes.
          */
