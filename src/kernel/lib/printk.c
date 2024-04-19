@@ -12,11 +12,14 @@
 
 const char *level_strs[] = {
         [LOG_ERROR] = "error", [LOG_DUMP] = "dump",   [LOG_WARN] = "warn",
-        [LOG_INFO] = "info",   [LOG_DEBUG] = "debug",
+        [LOG_INFO] = "info",   [LOG_DEBUG] = "debug", [LOG_LOG] = "log"
 };
 
 static struct term printkterm = PRINTK_TERM_INIT;
 
+
+// Modified to avoid printing everything to the screen but still
+// keep logs. Suggestion from Odin Bjerke.
 int vkprintf(enum log_level lvl, const char *fmt, va_list args)
 {
     /* On dump, set the screen cursor to grow mode. */
@@ -26,10 +29,13 @@ int vkprintf(enum log_level lvl, const char *fmt, va_list args)
     int  ret = vsnprintf(buf, PRINTK_BUF_SZ, fmt, args);
     if (ret < 0) return ret;
 
-    term_puts(&printkterm, buf);
+    // provide option to only write to file without using the screen
+    if (lvl != LOG_LOG)
+        term_puts(&printkterm, buf);
     serial_puts(PORT_COM1, buf);
     return ret;
 }
+
 
 ATTR_PRINTFLIKE(2, 3) int kprintf(enum log_level lvl, const char *fmt, ...)
 {

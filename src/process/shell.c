@@ -53,7 +53,6 @@ int main(void)
     char                line[LINE_MAX];    /* unparsed command */
 
     term.show_cursor = true;
-
     shprintf("D-240 Shell Version 0.00001\n\n");
 
     /* open mbox for communication with plane */
