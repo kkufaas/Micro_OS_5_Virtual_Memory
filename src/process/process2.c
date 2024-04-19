@@ -32,7 +32,7 @@ int main(void)
 
     int i, res;
 
-    for (i = 0; i <= 20; i++) {
+    for (i = 0; i <= 100; i++) {
         res = rec(i);
 
         tprintf(&term, "%2d ", getpid());

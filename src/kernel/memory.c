@@ -748,7 +748,8 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
     uint32_t *kernel_ptable = allocate_page();
 
     // Conditionally apply the PE_INFO_PINNED flag depending on the pid of the process
-    uint32_t kernel_page_info_flags = (pcb->pid == 11) ? PE_INFO_PINNED : 0;
+    //uint32_t kernel_page_info_flags = (pcb->pid == 11) ? PE_INFO_PINNED : 0;
+    uint32_t kernel_page_info_flags = PE_INFO_PINNED;
     insert_page_frame_info(kernel_ptable, kernel_ptable, pcb, kernel_page_info_flags);
 
     if (pcb->pid == 11) {
@@ -804,7 +805,8 @@ void setup_process_vmem(pcb_t *p)
     }
 
     // Define base page info flags. Always pin if pid is 11.
-    uint32_t base_page_info_flags = (p->pid == 11) ? (PE_INFO_PINNED | PE_INFO_USER_MODE) : PE_INFO_USER_MODE;
+    // uint32_t base_page_info_flags = (p->pid == 11) ? (PE_INFO_PINNED | PE_INFO_USER_MODE) : PE_INFO_USER_MODE;
+    uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
 
     uint32_t *proc_pdir = allocate_page();
     insert_page_frame_info(proc_pdir, proc_pdir, p, base_page_info_flags); // Conditionally pin the page directory
@@ -1315,7 +1317,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         return success;
     }
 
-    fifo_enqueue_info(frameref);
+    if ( !(info_mode & PE_INFO_PINNED) ) {
+        fifo_enqueue_info(frameref);
+    }
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode); // Apply info_mode with possibly pinned flag
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
