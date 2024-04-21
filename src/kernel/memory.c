@@ -32,10 +32,6 @@
 
 #define UNUSED(x)   ((void) x)
 #define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
-// #define KERNEL_SIZE        0x300000 // 3 MB in hexadecimal
-
-// #define KERNEL_SIZE 640 * 1024
-
 #define MEMDEBUG           1
 #define DEBUG_PAGEFAULT    1
 #define MEM_DEBUG_LOADPROC 1
@@ -61,9 +57,6 @@ static spinlock_t next_free_mem_lock   = SPINLOCK_INIT;
 
 /* === Page allocation tracking === */
 static lock_t page_map_lock = LOCK_INIT;
-
-// static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
-// static spinlock_t fifo_alloc_lock      = SPINLOCK_INIT;
 
 inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t       *get_page_table(uint32_t vaddr, uint32_t *page_directory);
@@ -91,10 +84,6 @@ void print_fifo_queue();
 // is shareable --> considerable optimization still possible
 ///////////////////////////////////////////////////////
 
-//
-// idea from hashmaps: collisions only for physical
-// pages shared between different processes
-//
 
 /* === Info structure to keep track on pages condition === */
 
@@ -133,7 +122,7 @@ page_frame_info_t *page_free_head;
  pages within a predefined memory region. This function sets up each page frame
  info structure with a sequential physical address, starting from a defined
  base, and links each to its subsequent frame to form a single-linked list of
- free page frames. The function also initializes a parallel array for shared
+ free page frames. It also initializes a parallel array for shared
  page frames, albeit without any owner or physical address, to be used for
  tracking shared page frame information.
 */
@@ -159,7 +148,7 @@ void initialize_page_frame_infos(void)
 
 /*
 Adds a page frame, identified by its physical address, to the head of the
-global free page frame list. This function calculates the index of the page
+global free page frame list and calculates the index of the page
 frame based on its physical address and then links it to the current head of
 the free list, making it the new head. It is the responsibility of the caller
 to ensure that access to this function is synchronized using the provided
@@ -178,8 +167,7 @@ void add_page_frame_to_free_list_info(uintptr_t *paddress)
 
 /*
 Removes and returns the first page frame from the global free list of page
-frames. If the free list is empty, it returns NULL. When a page frame is
-removed from the free list, the function updates the head of the list to the
+frames. When a page frame is removed from the free list, the function updates the head of the list to the
 next page frame in the list and clears the 'next' pointer of the removed frame.
  */
 page_frame_info_t *remove_page_frame_from_free_list_info()
@@ -270,7 +258,8 @@ page_frame_info_t *insert_page_frame_info(
 }
 
 static spinlock_t pinned_pages_counter_lock = SPINLOCK_INIT;
-void              inc_pinned_pages(int increment)
+
+void inc_pinned_pages(int increment)
 {
     spinlock_acquire(&pinned_pages_counter_lock);
     number_of_pinned_page_frames += increment;
@@ -288,8 +277,6 @@ static FIFOQueue fifo_queue;
 
 void fifo_init()
 {
-    // fifo_queue.front = -1;
-    // fifo_queue.rear = -1;
     fifo_queue.next_in  = 0;
     fifo_queue.next_out = 0;
     fifo_queue.items    = 0;
@@ -298,19 +285,13 @@ void fifo_init()
     }
 }
 
-
-
-
-
 bool fifo_is_empty()
 {
-    // return fifo_queue.next_in == fifo_queue.next_out;
     return fifo_queue.items == 0;
 }
 
 bool fifo_is_full()
 {
-    // return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
     bool is_full;
     spinlock_acquire(&pinned_pages_counter_lock);
     is_full =
@@ -346,9 +327,7 @@ void fifo_enqueue_info(uint32_t *paddr)
 {
     
     uint32_t info_index = calculate_info_index(paddr);
-    //spinlock_acquire(&page_frame_info_lock);
     int      pinned = page_frame_info[info_index].info_mode & PE_INFO_PINNED;
-    //spinlock_release(&page_frame_info_lock);
     if (!pinned) {
         fifo_enqueue(info_index);
     }
@@ -361,10 +340,7 @@ uint32_t *fifo_dequeue_info(int *error)
         return NULL;
     }
 
-    //spinlock_acquire(&page_frame_info_lock);
     uint32_t *paddr = page_frame_info[fifo_index].paddr;
-    //spinlock_release(&page_frame_info_lock);
-
     return paddr;
 }
 
@@ -375,7 +351,6 @@ uint32_t *fifo_dequeue_info(int *error)
 uint32_t *allocate_page_internal()
 {
     uint32_t *paddr = NULL;
-    //spinlock_acquire(&page_frame_info_lock);
     page_frame_info_t *page_info_frame =
             remove_page_frame_from_free_list_info();
 
@@ -386,13 +361,11 @@ uint32_t *allocate_page_internal()
             *(paddr + i) = 0;
         }
     }
-    //spinlock_release(&page_frame_info_lock);
     return paddr;
 }
 
 uint32_t *allocate_page()
 {
-    //nointerrupt_enter();
     uint32_t *paddr = allocate_page_internal();
     if (paddr == NULL) {
         // page table full, evict
@@ -412,7 +385,6 @@ uint32_t *allocate_page()
         pr_log("allocate_page: allocated page frame %p \n", paddr);
         nointerrupt_leave();
     }
-    //nointerrupt_leave();
     return paddr;
 }
 
@@ -649,8 +621,7 @@ void print_page_table_info(void)
 
         // Check if the page frame is used
         if (info->owner != NULL) {
-            uint32_t owner_pid = info->owner->pid; // Assuming the PCB
-                                                   // structure has a PID field
+            uint32_t owner_pid = info->owner->pid; 
             pr_log(
                     "%-5d | %-12u | 0x%013x | 0x%013x | %-20s\n", 
                     i, owner_pid, (uint32_t) info->vaddr, (uint32_t) info->paddr,
@@ -673,9 +644,6 @@ void print_page_table_info(void)
     /* clang-format on*/
 }
 
-
-/* Prints the contents of the FIFO queue, showing physical addresses in
- * extended format. */
 /* Prints the contents of the FIFO queue, showing physical addresses in
  * extended format and marking the positions of next_in and next_out. */
 void print_fifo_queue()
@@ -694,8 +662,6 @@ void print_fifo_queue()
         // Convert page index back to physical address for clarity, if needed
         uint32_t paddr_index = fifo_queue.queue[current];
         uintptr_t *current_paddr = page_frame_info[paddr_index].paddr;
-
-        // Determine if the current index is next_out or next_in
         const char *position = "";
         if (current == fifo_queue.next_out) {
             position = "next_out";
@@ -727,7 +693,6 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
     uint32_t *kernel_ptable = allocate_page();
 
     // Conditionally apply the PE_INFO_PINNED flag depending on the pid of the process
-    //uint32_t kernel_page_info_flags = (pcb->pid == 11) ? PE_INFO_PINNED : 0;
     uint32_t kernel_page_info_flags = PE_INFO_PINNED;
     insert_page_frame_info(kernel_ptable, kernel_ptable, pcb, kernel_page_info_flags);
 
@@ -783,8 +748,6 @@ void setup_process_vmem(pcb_t *p)
         return;
     }
 
-    // Define base page info flags. Always pin if pid is 11.
-    // uint32_t base_page_info_flags = (p->pid == 11) ? (PE_INFO_PINNED | PE_INFO_USER_MODE) : PE_INFO_USER_MODE;
     uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
 
     uint32_t *proc_pdir = allocate_page();
@@ -799,7 +762,7 @@ void setup_process_vmem(pcb_t *p)
     insert_page_frame_info(proc_ptable, proc_ptable, p, base_page_info_flags); // Conditionally pin the page table
 
     if (p->pid == 11) {
-        inc_pinned_pages(2); // Increment for the page directory and page table if pid is 11
+        inc_pinned_pages(2);
     }
 
     uint32_t paddr, vaddr, offset;
@@ -1101,7 +1064,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
         frameref_table = allocate_page();
-        insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode); // Apply info_mode with possibly pinned flag
+        insert_page_frame_info(frameref_table, (uintptr_t *) vaddr, pcb, info_mode);
         inc_pinned_pages(1);
         dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     }
@@ -1115,7 +1078,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     if ( !(info_mode & PE_INFO_PINNED) ) {
         fifo_enqueue_info(frameref);
     }
-    insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode); // Apply info_mode with possibly pinned flag
+    insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode); 
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     set_page_directory(pcb->page_directory);
@@ -1187,12 +1150,6 @@ uint32_t *try_evict_page_v2()
     info_index = calculate_info_index(page_frame_ref);
     frame_info = &page_frame_info[info_index];
 
-    // if (frame_info->info_mode & PE_INFO_PINNED) {
-    //     nointerrupt_enter();
-    //     pr_error("try_to_evict: suggested evicting pinned page\n");
-    //     nointerrupt_leave();
-    //     abortk();
-    // }
     if (frame_info->info_mode & PE_INFO_KERNEL_DUMMY) {
         nointerrupt_enter();
         pr_error("try_to_evict: suggested evicting kernel page\n");
@@ -1252,22 +1209,12 @@ uint32_t *try_evict_page_v1()
                 write_page_back_to_disk(
                         (uint32_t) frame_info->vaddr, frame_info->owner
                 );
-                // Proceed to unmap the page
-                // unmap_physical_page(
-                //         frame_info->owner->page_directory,
-                //         (uint32_t) frame_info->vaddr
-                // );
-
                 page_free(frame_info->paddr, 1);
 
                 return frame_info->paddr;
             } else if (dirty == 0) {
                 // The page is not dirty, proceed with eviction directly
                 pr_log("try_to_evict: not dirty \n");
-                // unmap_physical_page(
-                //         frame_info->owner->page_directory,
-                //         (uint32_t) frame_info->vaddr
-                // );
                 page_free(frame_info->paddr, 1);
                 return frame_info->paddr;
             } else {
@@ -1383,9 +1330,6 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         nointerrupt_enter();
         if (success >= 0) {
-            // Only process if the error code is 4 or 6
-            // page not present read, or page not present write
-
             pr_log(
                     "page_fault_handler: loaded page from disk into memory for pid %u,  with page fault count %u\n\n",
                     fault_pcb -> pid, fault_pcb -> page_fault_count
