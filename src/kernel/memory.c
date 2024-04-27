@@ -974,7 +974,7 @@ uint32_t *get_page_table(uint32_t vaddr, uint32_t *page_directory)
 }
 
 
-int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb)
+int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
 {
 
     /*
@@ -1000,20 +1000,23 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb)
     }
     uint32_t  disk_loc = pcb->swap_loc + disk_offset;
 
-    uint32_t *frameref_table;
-    if (!(frameref_table = get_page_table(vaddr, pcb->page_directory))) {
-        // nothing to do, no page with this virtual address precent in pcb
-        // page dir
-        pr_error(
-                "write_page_back_to_disk: no vaddr found in page "
-                "directory\n"
-        );
-        return -1;
-    }
-    uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
-    success = scsi_write(disk_loc, write_block_count, (void *) frameref);
+    // uint32_t *frameref_table;
+    // if (!(frameref_table = get_page_table(vaddr, pcb->page_directory))) {
+    //     // nothing to do, no page with this virtual address precent in pcb
+    //     // page dir
+    //     pr_error(
+    //             "write_page_back_to_disk: no vaddr found in page "
+    //             "directory\n"
+    //     );
+    //     return -1;
+    // }
+    // uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
+    //success = scsi_write(disk_loc, write_block_count, (char *) frameref);
+
+    success = scsi_write(disk_loc, write_block_count, (char *) paddr);
+    
     /* clang-format off */
-    pr_log( "Page at virtual address 0x%08x written back to disk at offset 0x%08x for pid %u\n", vaddr, disk_offset, pcb -> pid);
+    pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x written back to disk at offset 0x%08x for pid %u\n", vaddr, disk_offset, pcb -> pid);
     /* clang-format on */
     return success;
 }
@@ -1084,9 +1087,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     }
 
     int success = -1;
-    lock_acquire(&page_map_lock);
+    //lock_acquire(&page_map_lock);
     frameref  = allocate_page();
-    lock_release(&page_map_lock);
+    //lock_release(&page_map_lock);
 
     if (!frameref) {
         nointerrupt_enter();
@@ -1097,7 +1100,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         success = disk_loader(disk_loc, block_count, frameref);
     }
 
-    lock_acquire(&page_map_lock);
+    //lock_acquire(&page_map_lock);
     frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
         frameref_table = allocate_page();
@@ -1119,7 +1122,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     set_page_directory(pcb->page_directory);
-    lock_release(&page_map_lock);
+    //lock_release(&page_map_lock);
 
     nointerrupt_enter();
     pr_log("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x for pid = %u\n",
@@ -1187,12 +1190,12 @@ uint32_t *try_evict_page_v2()
     info_index = calculate_info_index(page_frame_ref);
     frame_info = &page_frame_info[info_index];
 
-    // if (frame_info->info_mode & PE_INFO_PINNED) {
-    //     nointerrupt_enter();
-    //     pr_error("try_to_evict: suggested evicting pinned page\n");
-    //     nointerrupt_leave();
-    //     abortk();
-    // }
+    if (frame_info->info_mode & PE_INFO_PINNED) {
+        nointerrupt_enter();
+        pr_error("try_to_evict: suggested evicting pinned page\n");
+        nointerrupt_leave();
+        abortk();
+    }
     if (frame_info->info_mode & PE_INFO_KERNEL_DUMMY) {
         nointerrupt_enter();
         pr_error("try_to_evict: suggested evicting kernel page\n");
@@ -1209,7 +1212,7 @@ uint32_t *try_evict_page_v2()
 
     // check if page frame is dirty
     if (page_frame_check_dirty(page_frame_ref)) {
-        write_page_back_to_disk(vaddr, frame_info->owner);
+        write_page_back_to_disk(vaddr, frame_info->owner, frame_info->paddr);
     }
 
     // puts this page frame back in the free list,
@@ -1250,7 +1253,7 @@ uint32_t *try_evict_page_v1()
                 pr_log("try_to_evict: dirty \n");
                 // The page is dirty, write it back to disk
                 write_page_back_to_disk(
-                        (uint32_t) frame_info->vaddr, frame_info->owner
+                        (uint32_t) frame_info->vaddr, frame_info->owner, frame_info->paddr
                 );
                 // Proceed to unmap the page
                 // unmap_physical_page(
@@ -1377,9 +1380,11 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         nointerrupt_leave();
 
-        lock_acquire(&page_fault_debug_lock);
+        //lock_acquire(&page_fault_debug_lock);
+        lock_acquire(&page_map_lock);
         int success = load_page_from_disk((uint32_t) fault_address, fault_pcb);
-        lock_release(&page_fault_debug_lock);
+        lock_release(&page_map_lock);
+        //lock_release(&page_fault_debug_lock);
 
         nointerrupt_enter();
         if (success >= 0) {
