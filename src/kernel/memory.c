@@ -31,8 +31,10 @@
 #include "usb/scsi.h"
 
 #define UNUSED(x)   ((void) x)
-#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
+//#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 // #define KERNEL_SIZE        0x300000 // 3 MB in hexadecimal
+#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
+//#define KERNEL_SIZE PAGING_AREA_MIN_PADDR + 1
 
 // #define KERNEL_SIZE 640 * 1024
 
@@ -303,9 +305,6 @@ void fifo_init()
 }
 
 
-
-
-
 bool fifo_is_empty()
 {
     // return fifo_queue.next_in == fifo_queue.next_out;
@@ -314,13 +313,13 @@ bool fifo_is_empty()
 
 bool fifo_is_full()
 {
-    // return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
-    bool is_full;
-    spinlock_acquire(&pinned_pages_counter_lock);
-    is_full =
-            fifo_queue.items == PAGEABLE_PAGES - number_of_pinned_page_frames;
-    spinlock_release(&pinned_pages_counter_lock);
-    return is_full;
+    return (fifo_queue.next_in + 1) % PAGEABLE_PAGES == fifo_queue.next_out;
+    // bool is_full;
+    // spinlock_acquire(&pinned_pages_counter_lock);
+    // is_full =
+    //         fifo_queue.items == PAGEABLE_PAGES - number_of_pinned_page_frames;
+    // spinlock_release(&pinned_pages_counter_lock);
+    // return is_full;
 }
 
 bool fifo_enqueue(uint32_t item)
@@ -342,6 +341,7 @@ uint32_t fifo_dequeue(int *error)
     uint32_t item       = fifo_queue.queue[fifo_queue.next_out];
     fifo_queue.next_out = (fifo_queue.next_out + 1) % PAGEABLE_PAGES;
     fifo_queue.items--;
+    pr_log("fifo_dequeue next.out index = %u\n", fifo_queue.next_out);
 
     return item;
 }
@@ -479,50 +479,52 @@ void page_free(uintptr_t *paddr, int evict)
     } while (info_frame);
 }
 
-
+// current bug: locks cause process to skip scheduler entry or return from it
+// solution is probably to use a cleaner thread/daemon like suggested in Tanenbaum MOS.
 void free_done_process_memory(pcb_t *p) 
 {
-    uint32_t table_index, dir_index, vaddr, *table;
-    uint32_t dir_entry, table_entry, old_mode;
-    // the quick and dirty way - linear search through entire pageable area,
-    // mark all pages belonging to this process as not pinned.
-    lock_acquire(&page_map_lock);
-    for (int i=0; i < PAGEABLE_PAGES; i++) {
-        if (page_frame_info[i].owner == p) {
+    // uint32_t table_index, dir_index, vaddr, *table;
+    // uint32_t dir_entry, table_entry, old_mode;
+    // // the quick and dirty way - linear search through entire pageable area,
+    // // mark all pages belonging to this process as not pinned.
+    // lock_acquire(&page_map_lock);
+    // for (int i=0; i < PAGEABLE_PAGES; i++) {
+    //     if (page_frame_info[i].owner == p) {
 
-            
-            // slight modification of page_set_mode to instead just clear dirty  bit,
-            // because we don't want to write pages of finished processes to disc.
-            // #################################################################
-            vaddr = (uint32_t) page_frame_info[i].vaddr;
-            dir_index = get_directory_index(vaddr);
-            table_index = get_table_index((uint32_t) vaddr);
+    //         
+    //         // slight modification of page_set_mode to instead just clear dirty  bit,
+    //         // because we don't want to write pages of finished processes to disc.
+    //         // #################################################################
+    //         // vaddr = (uint32_t) page_frame_info[i].vaddr;
+    //         // dir_index = get_directory_index(vaddr);
+    //         // table_index = get_table_index((uint32_t) vaddr);
 
-            // table_index = get_table_index(vaddr);
-            // table = p -> page_directory[dir_index] & PE_BASE_ADDR_MASK;
+    //         // // table_index = get_table_index(vaddr);
+    //         // // table = p -> page_directory[dir_index] & PE_BASE_ADDR_MASK;
 
-            dir_entry = p->page_directory[dir_index];
-            assertk(dir_entry & PE_P); /* dir entry present */
-            table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
-            table_entry = table[table_index];
+    //         // dir_entry = p->page_directory[dir_index];
+    //         // assertk(dir_entry & PE_P); /* dir entry present */
+    //         // table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
+    //         // table_entry = table[table_index];
 
-            /* set table[index] bits 11..0 */
-            old_mode = table_entry & PE_BASE_ADDR_MASK;
-            table_entry |= (old_mode & ~(PE_D)) & ~PE_BASE_ADDR_MASK;
-            table[table_index] = table_entry;
-            // #################################################################
+    //         // /* set table[index] bits 11..0 */
+    //         // old_mode = table_entry & PE_BASE_ADDR_MASK;
+    //         // table_entry |= (old_mode & ~(PE_D)) & ~PE_BASE_ADDR_MASK;
+    //         // table[table_index] = table_entry;
+    //         // // #################################################################
 
 
-            // put pinned pages to the fifo-queue so that they become available
-            // for paging/swapping.
-            if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
-                fifo_enqueue(i);
-            }
-            // unpin the page frame, page fault handler can now swap it when added to the fifo queue
-            page_frame_info[i].info_mode &=~(PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY | PE_INFO_USER_MODE);
-        }
-    }
-    lock_release(&page_map_lock);
+    //         // put pinned pages to the fifo-queue so that they become available
+    //         // for paging/swapping.
+    //         if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
+    //             fifo_enqueue(i);
+    //             page_frame_info[i].info_mode &=~(PE_INFO_PINNED);
+    //         }
+    //         // unpin the page frame, page fault handler can now swap it when added to the fifo queue
+    //         //page_frame_info[i].info_mode &=~(PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY | PE_INFO_USER_MODE);
+    //     }
+    // }
+    // lock_release(&page_map_lock);
 }
 
 
@@ -603,7 +605,8 @@ static inline void page_set_mode(uint32_t *pdir, uint32_t vaddr, uint32_t mode)
     entry |= mode & ~PE_BASE_ADDR_MASK;
     table[index] = entry;
     /* Flush TLB */
-    invalidate_page((uint32_t *) vaddr);
+    // original: invalidate_page((uint32_t *) vaddr);
+    if (pdir == current_running -> page_directory) invalidate_page((uint32_t *) vaddr);
 }
 
 /* Debug-function.
@@ -757,13 +760,10 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
     uint32_t *kernel_ptable = allocate_page();
 
     // Conditionally apply the PE_INFO_PINNED flag depending on the pid of the process
-    //uint32_t kernel_page_info_flags = (pcb->pid == 11) ? PE_INFO_PINNED : 0;
     uint32_t kernel_page_info_flags = PE_INFO_PINNED;
     insert_page_frame_info(kernel_ptable, kernel_ptable, pcb, kernel_page_info_flags);
 
-    if (pcb->pid == 11) {
-        inc_pinned_pages(1); // Increment pinned pages only if pid is 11
-    }
+    inc_pinned_pages(1); 
 
     // Identity map the entire kernel region.
     for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
@@ -781,6 +781,7 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
 
     // Map the video memory from 0xB8000 to 0xB8FFF.
     int mode = (is_user ? user_mode : kernel_mode);
+    mode |= PE_PCD; // dont cache video memory
     pr_log("user mode ?? %d\n", mode & PE_US);
     table_map_page(kernel_ptable, (uint32_t)VGA_TEXT_PADDR, (uint32_t)VGA_TEXT_PADDR, mode);
     dir_ins_table(pdir, VGA_TEXT_PADDR, kernel_ptable, mode);
@@ -1005,6 +1006,7 @@ uint32_t *get_page_table(uint32_t vaddr, uint32_t *page_directory)
 }
 
 char write_buffer[PAGE_SIZE];
+lock_t write_buffer_lock = LOCK_INIT;
 int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
 {
 
@@ -1029,29 +1031,39 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
         nointerrupt_leave();
         return success;
     }
-    uint32_t  disk_loc = pcb->swap_loc + disk_offset;
+    uint32_t disk_loc = pcb->swap_loc + disk_offset;
 
-    // uint32_t *frameref_table;
-    // if (!(frameref_table = get_page_table(vaddr, pcb->page_directory))) {
-    //     // nothing to do, no page with this virtual address precent in pcb
-    //     // page dir
-    //     pr_error(
-    //             "write_page_back_to_disk: no vaddr found in page "
-    //             "directory\n"
-    //     );
-    //     return -1;
-    // }
-    // uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
-    //success = scsi_write(disk_loc, write_block_count, (char *) frameref);
-    //for(int i=0; i < PAGE_SIZE; i++) write_buffer[i] = paddr[i];
+    uint32_t *frameref_table;
+    if (!(frameref_table = get_page_table(vaddr, pcb->page_directory))) {
+         // nothing to do, no page with this virtual address precent in pcb
+         // page dir
+         pr_error(
+                 "write_page_back_to_disk: no vaddr found in page "
+                 "directory\n"
+         );
+         return -1;
+    }
+    uint32_t *frameref = (uint32_t *) (frameref_table[get_table_index(vaddr)] & PE_BASE_ADDR_MASK);
+    for (int i=0; i < PAGE_SIZE; i++) write_buffer[i] = frameref[i];
     nointerrupt_enter();
-    bcopy((char *) paddr, write_buffer, PAGE_SIZE);
+    bcopy((char *) frameref, write_buffer, PAGE_SIZE);
     nointerrupt_leave();
+    lock_acquire(&write_buffer_lock);
     success = scsi_write(disk_loc, write_block_count, write_buffer);
+    lock_release(&write_buffer_lock);
+
+    // success = scsi_write(disk_loc, write_block_count, (char *) frameref);
+
+    // for(int i=0; i < PAGE_SIZE; i++) write_buffer[i] = paddr[i];
+    // nointerrupt_enter();
+    // bcopy((char *) paddr, write_buffer, PAGE_SIZE);
+    // nointerrupt_leave();
+    // success = scsi_write(disk_loc, write_block_count, write_buffer);
     // success = scsi_write(disk_loc, write_block_count, (char *) paddr);
     
     /* clang-format off */
-    pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x written back to disk at offset 0x%08x for pid %u\n", vaddr, disk_offset, pcb->pid);
+    pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x referencing frame %0x08x written back to disk at offset 0x%08x = %u for pid %u\n", 
+                                                                vaddr, (uint32_t) frameref, disk_offset, disk_offset,  pcb->pid);
     /* clang-format on */
     return success;
 }
@@ -1114,9 +1126,11 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     load_page_pr_log(pcb->pid, (void *) vaddr, disk_offset, pcb->swap_size);
     nointerrupt_leave();
 
-    mode = PE_P | PE_RW;
+    mode = PE_P | PE_RW | PE_US;
     if (pcb->is_thread) {
-        info_mode = PE_INFO_PINNED; // Ensure kernel threads have their pages pinned
+        //info_mode = PE_INFO_PINNED; 
+        pr_error("thread pid %u is paging \n", pcb->pid);
+        abortk();
     } else {
         info_mode = PE_INFO_USER_MODE;
         mode |= PE_US;
@@ -1130,7 +1144,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
 
     int success = -1;
     //lock_acquire(&page_map_lock);
-    frameref  = allocate_page();
+    frameref = allocate_page();
     //lock_release(&page_map_lock);
 
     if (!frameref) {
@@ -1167,8 +1181,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     //lock_release(&page_map_lock);
 
     nointerrupt_enter();
-    pr_log("load_page_from_disk: Loaded page at virtual address 0x%08x from disk into physical address 0x%08x for pid = %u\n",
-           vaddr, (uint32_t) frameref, pcb -> pid);
+    pr_log("load_page_from_disk: Loaded page at virtual address 0x%08x with disk offset 0x%08x = %u from disk into physical address 0x%08x for pid = %u\n",
+           vaddr, disk_offset, disk_offset, (uint32_t) frameref, pcb -> pid);
     nointerrupt_leave();
 
     return success;
@@ -1376,7 +1390,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
     uint32_t *fault_address   = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
-    //invalidate_page(fault_address);
+    invalidate_page(fault_address);
     pcb_t *fault_pcb = current_running;
     fault_pcb -> page_fault_count++;
 
