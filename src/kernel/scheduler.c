@@ -171,9 +171,11 @@ noreturn void exit(void)
 {
     nointerrupt_enter();
     current_running->status = STATUS_EXITED;
-    if ( !(current_running -> is_thread) ) {
-        //free_done_process_memory(current_running);
-    }
+
+    // if ( !(current_running -> is_thread) ) {
+    //     free_done_process_memory(current_running);
+    // }
+
     /* Removes job from ready queue, and dispatches next job to run */
     scheduler_entry();
     /* No need to leave the critical section. This code is unreachable. */

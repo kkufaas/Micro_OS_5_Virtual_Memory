@@ -43,6 +43,10 @@
 
 #define MIN(x, y) (x < y ? x : y)
 
+#define PIN_SHELL 0
+uint32_t first_process = 1;
+uint32_t first_process_pid;
+
 static pcb_t dummy_kernel_pcb[1];
 
 static uint32_t  number_of_pinned_page_frames = 0;
@@ -478,11 +482,37 @@ void page_free(uintptr_t *paddr, int evict)
 
 void free_done_process_memory(pcb_t *p) 
 {
+    uint32_t table_index, dir_index, vaddr, *table;
+    uint32_t dir_entry, table_entry, old_mode;
     // the quick and dirty way - linear search through entire pageable area,
     // mark all pages belonging to this process as not pinned.
     lock_acquire(&page_map_lock);
     for (int i=0; i < PAGEABLE_PAGES; i++) {
         if (page_frame_info[i].owner == p) {
+
+            
+            // slight modification of page_set_mode to instead just clear dirty  bit,
+            // because we don't want to write pages of finished processes to disc.
+            // #################################################################
+            vaddr = (uint32_t) page_frame_info[i].vaddr;
+            dir_index = get_directory_index(vaddr);
+            table_index = get_table_index((uint32_t) vaddr);
+
+            // table_index = get_table_index(vaddr);
+            // table = p -> page_directory[dir_index] & PE_BASE_ADDR_MASK;
+
+            dir_entry = p->page_directory[dir_index];
+            assertk(dir_entry & PE_P); /* dir entry present */
+            table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
+            table_entry = table[table_index];
+
+            /* set table[index] bits 11..0 */
+            old_mode = table_entry & PE_BASE_ADDR_MASK;
+            table_entry |= (old_mode & ~(PE_D)) & ~PE_BASE_ADDR_MASK;
+            table[table_index] = table_entry;
+            // #################################################################
+
+
             // put pinned pages to the fifo-queue so that they become available
             // for paging/swapping.
             if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
@@ -783,8 +813,14 @@ void setup_process_vmem(pcb_t *p)
         return;
     }
 
-    // Define base page info flags. Always pin if pid is 11.
-    // uint32_t base_page_info_flags = (p->pid == 11) ? (PE_INFO_PINNED | PE_INFO_USER_MODE) : PE_INFO_USER_MODE;
+
+    if (first_process) {
+        nointerrupt_enter();
+        first_process_pid = p -> pid;
+        first_process = 0;
+        nointerrupt_leave();
+    }
+
     uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
 
     uint32_t *proc_pdir = allocate_page();
@@ -797,10 +833,7 @@ void setup_process_vmem(pcb_t *p)
 
     uint32_t *proc_ptable = allocate_page();
     insert_page_frame_info(proc_ptable, proc_ptable, p, base_page_info_flags); // Conditionally pin the page table
-
-    if (p->pid == 11) {
-        inc_pinned_pages(2); // Increment for the page directory and page table if pid is 11
-    }
+    inc_pinned_pages(2); 
 
     uint32_t paddr, vaddr, offset;
     uint32_t upper_lim = (p->swap_size) * SECTOR_SIZE / PAGE_SIZE;
@@ -822,9 +855,7 @@ void setup_process_vmem(pcb_t *p)
             base_page_info_flags  // Apply the pinning flags consistently for stack pages
         );
 
-        if (p->pid == 11) {
-            inc_pinned_pages(1);  // Increment pinned pages counter for stack pages if pid is 11
-        }
+        inc_pinned_pages(1);  
 
         pr_debug(
             "allocated a stack frame with vaddr=%x at paddr %x, proceeding to map \n",
@@ -973,7 +1004,7 @@ uint32_t *get_page_table(uint32_t vaddr, uint32_t *page_directory)
     return page_table;
 }
 
-
+char write_buffer[PAGE_SIZE];
 int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
 {
 
@@ -1012,11 +1043,15 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
     // }
     // uint32_t *frameref = &frameref_table[get_table_index(vaddr)];
     //success = scsi_write(disk_loc, write_block_count, (char *) frameref);
-
-    success = scsi_write(disk_loc, write_block_count, (char *) paddr);
+    //for(int i=0; i < PAGE_SIZE; i++) write_buffer[i] = paddr[i];
+    nointerrupt_enter();
+    bcopy((char *) paddr, write_buffer, PAGE_SIZE);
+    nointerrupt_leave();
+    success = scsi_write(disk_loc, write_block_count, write_buffer);
+    // success = scsi_write(disk_loc, write_block_count, (char *) paddr);
     
     /* clang-format off */
-    pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x written back to disk at offset 0x%08x for pid %u\n", vaddr, disk_offset, pcb -> pid);
+    pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x written back to disk at offset 0x%08x for pid %u\n", vaddr, disk_offset, pcb->pid);
     /* clang-format on */
     return success;
 }
@@ -1037,9 +1072,15 @@ lock_t read_buffer_lock = LOCK_INIT;
 int disk_loader(int disk_loc, int block_count, uint32_t *frameref) {
 
     lock_acquire(&read_buffer_lock);
+
+    // clear the read buffer
+    for (int i = 0; i < PAGE_SIZE; i++) read_buffer[i] = 0;
+
     int success = scsi_read(disk_loc, block_count, (void *) read_buffer);
     if (success >= 0) {
+        nointerrupt_enter();
         bcopy(read_buffer, (char *) frameref, PAGE_SIZE);
+        nointerrupt_leave();
     } else {
         pr_log("failed to read from disk\n");
     }
@@ -1081,8 +1122,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         mode |= PE_US;
     }
 
-    // If the process PID is 11, adjust info_mode to pin the pages
-    if (pcb->pid == 11) {
+    // // If the process PID is the first one assume it's the
+    // shell and pin if PIN_SHELL is set to 1
+    if (pcb->pid == first_process_pid && PIN_SHELL) {
         info_mode |= PE_INFO_PINNED; // Add the pinned flag for processes with pid 11
     }
 
@@ -1334,7 +1376,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 {
     uint32_t *fault_address   = (uint32_t *) load_page_fault_addr();
     uint32_t *fault_directory = (uint32_t *) load_current_page_directory();
-    // invalidate_page(fault_address);
+    //invalidate_page(fault_address);
     pcb_t *fault_pcb = current_running;
     fault_pcb -> page_fault_count++;
 
@@ -1359,7 +1401,7 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
     if (ec_privilige_violation(error_code)) {
         // abort - access violation
-        pr_error("page_fault_handler: virtual address: %p \n", fault_address);
+        pr_error("page_fault_handler: privilege error, virtual address: %p \n", fault_address);
         abortk();
     } else {
         // total_page_fault_page_not_present_counter++;
