@@ -27,6 +27,8 @@
 
 #include "sleep.h"
 
+#include "stdlib.h"
+
 
 // four pinned for stack, page directory and two page tables for kernel and user space
 // three on average required. This last number could be modeled better with. eg
@@ -34,6 +36,9 @@
 // keep competition for page frames at tolerable level to avoid thrashing.
 #define AVERAGE_PAGES_PER_PROCESS 7
 #define NEW_PROCESS_WAIT_TIME_FOR_PAGES 800 // millisecs
+
+
+lock_t load_process_lock_debug = LOCK_INIT;
 
 /* === Get PCB info === */
 
@@ -281,12 +286,32 @@ static uint32_t first_process = 1;
  */
 int create_process(uint32_t location, uint32_t size)
 {
+
+    lock_acquire(&load_process_lock_debug);
+    msleep(1000 + (rand() % 1000));
+    // nointerrupt_enter();
     if (first_process) {
         // initialize running_processes
         running_processes = 0;
         first_process = 0;
     }
 
+
+    // rough estimate - can be improved upon by using eg. p->swap_size for each
+    // process to estimate the number of pages used
+    uint32_t page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+    while(page_space_available < AVERAGE_PAGES_PER_PROCESS + 1) {
+        pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
+        pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
+        page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+        msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
+    }
+    running_processes += 1;
+    nointerrupt_enter();
+    pr_debug("loading process at location %u with size %u\n", location, size);
+    nointerrupt_leave();
+
+    nointerrupt_enter();
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
 
@@ -307,18 +332,15 @@ int create_process(uint32_t location, uint32_t size)
     p->swap_loc  = location;
     p->swap_size = size;
 
-    // rough estimate - can be improved upon by using eg. p->swap_size for each
-    // process to estimate the number of pages used
-    uint32_t page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
-    while(page_space_available < AVERAGE_PAGES_PER_PROCESS + 1) {
-        pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
-        pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
-        page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
-        msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
-    }
+    nointerrupt_leave();
+
     setup_process_vmem(p);
-    running_processes += 1;
+
+    nointerrupt_enter();
     queue_insert(&current_running, p);
+    nointerrupt_leave();
+
+    lock_release(&load_process_lock_debug);
 
     return 0;
 }
@@ -368,6 +390,7 @@ int readdir(unsigned char *buf)
 
     return 0;
 }
+
 
 /*
  * Load a process from disk.

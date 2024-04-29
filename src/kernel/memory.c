@@ -817,14 +817,18 @@ void setup_process_vmem(pcb_t *p)
     setup_kernel_vmem_common(p, proc_pdir, 1);
 
     uint32_t *proc_ptable = allocate_page();
-    insert_page_frame_info(proc_ptable, proc_ptable, p, base_page_info_flags); // Conditionally pin the page table
+    insert_page_frame_info(proc_ptable, proc_ptable, p, base_page_info_flags); // pin the page table
     inc_pinned_pages(2); 
 
     uint32_t paddr, vaddr, offset;
-    uint32_t upper_lim = (p->swap_size) * SECTOR_SIZE / PAGE_SIZE;
+    uint32_t upper_lim = ((p->swap_size) * SECTOR_SIZE);
+    pr_debug("setup vmem: upper_lim = %u bytes = %u pages \n", upper_lim, upper_lim / PAGE_SIZE);
     for (offset = 0; offset < upper_lim; offset += PAGE_SIZE) {
         paddr = p->swap_loc * SECTOR_SIZE + offset;
         vaddr = PROCESS_VADDR + offset;
+        nointerrupt_enter();
+        pr_debug("setup vmem: mapped vaddr 0x%08x to to user space for process pid %u\n", vaddr, p->pid);
+        nointerrupt_leave();
         table_map_page(proc_ptable, vaddr, paddr, user_mode);
         dir_ins_table(proc_pdir, vaddr, proc_ptable, user_mode | PE_P);
     }
