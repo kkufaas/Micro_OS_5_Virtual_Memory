@@ -28,6 +28,8 @@ static const ureg_t INIT_EFLAGS = ((PL0 << EFLAGS_IOPL_SHIFT) | EFLAGS_IF);
 /* The currently running process, and also a pointer to the ready queue */
 extern pcb_t *current_running;
 
+extern uint32_t running_processes;
+
 /* Low-level dispatch to next task. Defined in assembly. */
 void dispatch(void);
 

@@ -1,0 +1,25 @@
+ 1 Clock: 545 seconds         $ load 1
+ 3 Lock test A: 300 OK        Done.
+ 4 Lock test B: 300 OK        $ load 2
+                              Done.
+Process 3      Error          $ load 4
+162            Bad data       Done.
+                              $
+14 Did you know: 1 + ... + 100 = 5050                            ___       _
+                                                             | __\_\_o____/_|
+spurious IRQ: 1028                                           <[___\_\_-----<
+== Process status ==                                         |  o'
+Pid Type St    Pmpt    Yld PgFlt KStck
+  1 Thrd Run    364   9373     0 43f54
+  2 Thrd Run     21   2542     0 45f50
+  5 Thrd Run   5793      0     0 4be88
+  6 Thrd Blk   6520      0     0 4df2c
+  7 Thrd Blk   5791      0     0 4ff2c   5 phl nmlk _O_    thinking  179 meals
+  8 Thrd Run   3894   1947     0 51ea0   6 phl caps   _Oo  hungry    207 meals
+  9 Thrd Blk   3894   1947     0 53f24   7 phl scrl _   _O hungry    178 meals
+ 10 Thrd Run   3896   1947     0 55ea0   8 barrier test A:  1947
+ 11 Proc Blk     35     61     8 57e44   9 barrier test B:  1947
+ 12 Proc Blk    283    338    75 59e58  10 barrier test C:  1948
+debug: UHCI: TD actlen 31, status OK
+debug: UHCI: TD actlen 2048, status OK
+debug: UHCI: TD actlen 13, status OK

@@ -30,6 +30,8 @@
 #include "sync.h"
 #include "usb/scsi.h"
 
+
+
 #define UNUSED(x)   ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
 // #define KERNEL_SIZE        0x300000 // 3 MB in hexadecimal
@@ -46,8 +48,8 @@
 #define MIN(x, y) (x < y ? x : y)
 
 #define PIN_SHELL 0
-uint32_t first_process = 1;
-uint32_t first_process_pid;
+static uint32_t first_process = 1;
+static uint32_t first_process_pid;
 
 static pcb_t dummy_kernel_pcb[1];
 
@@ -371,6 +373,8 @@ uint32_t *fifo_dequeue_info(int *error)
 
     return paddr;
 }
+
+
 
 /*
  *  Allocates a page of memory by removing a page_info_frame from the list
@@ -804,6 +808,10 @@ static void setup_kernel_vmem(void)
 
 void setup_process_vmem(pcb_t *p)
 {
+
+    
+
+
     lock_acquire(&page_map_lock);
     pr_log("setup_process_vmem: setting up new process memory with pid: %u\n", p->pid);
 
@@ -821,6 +829,8 @@ void setup_process_vmem(pcb_t *p)
         first_process = 0;
         nointerrupt_leave();
     }
+
+
 
     uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
 

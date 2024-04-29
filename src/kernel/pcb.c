@@ -25,6 +25,8 @@
 #include "usb/scsi.h"
 #include "usb/usb.h"
 
+#include "sleep.h"
+
 /* === Get PCB info === */
 
 /* Get process PID (exported as syscall) */
@@ -264,13 +266,18 @@ int create_thread(uintptr_t start_addr)
     queue_insert(&current_running, p);
     return 0;
 }
-
+static uint32_t first_process = 1;
 /*
  * Allocate and set up the pcb for a new process, allocate resources
  * for it and insert it into the ready queue.
  */
 int create_process(uint32_t location, uint32_t size)
 {
+    if (first_process) {
+        // initialize running_processes
+        running_processes = 0;
+        first_process = 0;
+    }
 
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
@@ -291,8 +298,18 @@ int create_process(uint32_t location, uint32_t size)
 
     p->swap_loc  = location;
     p->swap_size = size;
-    setup_process_vmem(p);
 
+    // rough estimate - can be improved upon by using eg. p->swap_size for each
+    // process to estimate the number of pages used
+    uint32_t page_space_available = PAGEABLE_PAGES - running_processes*(4 + 3);
+    while(page_space_available < 8) {
+        pr_debug("not enough pages: sleeping while others finish\n");
+        pr_debug("not enough pages: currently %u processes running\n", running_processes);
+        page_space_available = PAGEABLE_PAGES - running_processes*(4 + 3);
+        msleep(300);
+    }
+    setup_process_vmem(p);
+    running_processes += 1;
     queue_insert(&current_running, p);
 
     return 0;

@@ -19,6 +19,7 @@
 
 /* Ready queue and pointer to currently running process */
 pcb_t *current_running;
+uint32_t running_processes;
 
 /* Helper function for dispatch() */
 void setup_current_running(void)
@@ -172,7 +173,11 @@ noreturn void exit(void)
     nointerrupt_enter();
     current_running->status = STATUS_EXITED;
 
-    // if ( !(current_running -> is_thread) ) {
+    if ( !(current_running -> is_thread) ) {
+        pr_debug("process exited \n");
+        running_processes -= 1;
+        pr_debug("current number of running processes %u \n", running_processes);
+    }
     //     free_done_process_memory(current_running);
     // }
 
