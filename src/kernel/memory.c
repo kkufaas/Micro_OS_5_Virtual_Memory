@@ -1263,56 +1263,6 @@ uint32_t *try_evict_page_v2()
     return page_frame_ref;
 }
 
-// Attempts to find and evict a page
-// Returns virtual address of the page that was evicted, or NULL if no
-// suitable page was found.
-uint32_t *try_evict_page_v1()
-{
-    uintptr_t         *frameref;
-    uint32_t           info_index;
-    page_frame_info_t *frame_info;
-
-    while (!fifo_is_empty()) { // Ensure there's something in the FIFO queue
-        uintptr_t *evicted_page_physical = select_page_for_eviction(
-        ); // Get the physical address of the page to evict
-        if (!evicted_page_physical) {
-            pr_debug("try_to_evict: No suitable page found for eviction\n");
-            return NULL;
-        }
-
-        if (!(frame_info->info_mode & PE_INFO_PINNED)) {
-        }
-        frameref   = evicted_page_physical;
-        info_index = calculate_info_index(frameref);
-        frame_info = &page_frame_info[info_index];
-
-        if (!(frame_info->info_mode & PE_INFO_PINNED)) {
-            // Check if the page is dirty before deciding to evict
-            int dirty = page_frame_check_dirty(frame_info->paddr);
-            if (dirty > 0) {
-                pr_log("try_to_evict: dirty \n");
-                // The page is dirty, write it back to disk
-                write_page_back_to_disk(
-                        (uint32_t) frame_info->vaddr, frame_info->owner
-                );
-                page_free(frame_info->paddr, 1);
-
-                return frame_info->paddr;
-            } else if (dirty == 0) {
-                // The page is not dirty, proceed with eviction directly
-                pr_log("try_to_evict: not dirty \n");
-                page_free(frame_info->paddr, 1);
-                return frame_info->paddr;
-            } else {
-                // page must not be evicted, continue
-                pr_error("try_to_evict: cannot evict \n");
-                continue;
-            }
-        }
-    }
-    // Couldn't find a suitable page to evict.
-    return NULL;
-}
 
 uint32_t *try_evict_page()
 {

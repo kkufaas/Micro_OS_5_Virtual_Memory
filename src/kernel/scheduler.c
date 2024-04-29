@@ -45,7 +45,6 @@ void setup_current_running(void)
 void scheduler(void)
 {
     nointerrupt_enter();
-
     unsigned long long t;
 
     /*
