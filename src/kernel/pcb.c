@@ -25,6 +25,16 @@
 #include "usb/scsi.h"
 #include "usb/usb.h"
 
+#include "sleep.h"
+
+
+// four pinned for stack, page directory and two page tables for kernel and user space
+// three on average required. This last number could be modeled better with. eg
+// a percentage of the size of the images loaded to memory. The idea is to
+// keep competition for page frames at tolerable level to avoid thrashing.
+#define AVERAGE_PAGES_PER_PROCESS 7
+#define NEW_PROCESS_WAIT_TIME_FOR_PAGES 800 // millisecs
+
 /* === Get PCB info === */
 
 /* Get process PID (exported as syscall) */
@@ -264,13 +274,18 @@ int create_thread(uintptr_t start_addr)
     queue_insert(&current_running, p);
     return 0;
 }
-
+static uint32_t first_process = 1;
 /*
  * Allocate and set up the pcb for a new process, allocate resources
  * for it and insert it into the ready queue.
  */
 int create_process(uint32_t location, uint32_t size)
 {
+    if (first_process) {
+        // initialize running_processes
+        running_processes = 0;
+        first_process = 0;
+    }
 
     pcb_t *p = alloc_pcb();
     create_pcb_common(p);
@@ -291,8 +306,18 @@ int create_process(uint32_t location, uint32_t size)
 
     p->swap_loc  = location;
     p->swap_size = size;
-    setup_process_vmem(p);
 
+    // rough estimate - can be improved upon by using eg. p->swap_size for each
+    // process to estimate the number of pages used
+    uint32_t page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+    while(page_space_available < AVERAGE_PAGES_PER_PROCESS + 1) {
+        pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
+        pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
+        page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+        msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
+    }
+    setup_process_vmem(p);
+    running_processes += 1;
     queue_insert(&current_running, p);
 
     return 0;

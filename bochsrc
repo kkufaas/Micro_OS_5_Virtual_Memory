@@ -6,7 +6,7 @@
 ## Simulation speed
 # Use sync=slowdown to emulate real time.
 # Comment this out to run as fast as possible (default sync=none).
-clock: sync=slowdown
+# clock: sync=slowdown
 
 ## CPU
 #
