@@ -34,8 +34,8 @@
 
 #define UNUSED(x)   ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
-#define KERNEL_SIZE        0x400000 // 3 MB in hexadecimal
-//#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
+//#define KERNEL_SIZE        0x400000 // 3 MB in hexadecimal
+#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
 //#define KERNEL_SIZE PAGING_AREA_MIN_PADDR + 1
 
 // #define KERNEL_SIZE 640 * 1024
@@ -60,6 +60,7 @@ enum {
     PE_INFO_USER_MODE    = 1 << 0, /* user */
     PE_INFO_KERNEL_DUMMY = 1 << 1, /* kernel ''dummy'' */
     PE_INFO_PINNED       = 1 << 2, /* pinned */
+    PE_INFO_STACK        = 1 << 3,
 };
 
 /* === Simple memory allocation === */
@@ -645,6 +646,7 @@ const char *decode_info_mode(uint32_t info_mode)
     if (info_mode & PE_INFO_USER_MODE) strcat(buffer, "USER ");
     if (info_mode & PE_INFO_KERNEL_DUMMY) strcat(buffer, "KERNEL ");
     if (info_mode & PE_INFO_PINNED) strcat(buffer, "PINNED ");
+    if (info_mode & PE_INFO_STACK) strcat(buffer, "STACK");
 
     if (buffer[0] == '\0') return "NONE";
     return buffer;
@@ -726,6 +728,40 @@ void print_fifo_queue()
     pr_log("----------------------------------------\n\n");
 }
 
+uint32_t* user_kernel_ptable;
+
+static void user_setup_kernel_vmem(pcb_t *pcb, uint32_t *pdir, int first_time)
+{
+    uint32_t user_mode = PE_P | PE_RW | PE_US; // Access mode for user pages.
+    uint32_t kernel_mode = PE_P | PE_RW; // Access mode for kernel pages.
+
+    if (first_time) {
+        // Conditionally apply the PE_INFO_PINNED flag depending on the pid of the process
+    }
+
+
+    // Identity map the entire kernel region.
+    for (uint32_t paddr = 0; paddr < KERNEL_SIZE; paddr += PAGE_SIZE) {
+        if (first_time) table_map_page(user_kernel_ptable, paddr, paddr, kernel_mode);
+        dir_ins_table(pdir, paddr, user_kernel_ptable, kernel_mode);
+    }
+
+    // Extend the identity mapping to the entire physical memory range managed by the kernel.
+    for (uint32_t paddr = PAGING_AREA_MIN_PADDR; paddr < PAGING_AREA_MAX_PADDR; paddr += PAGE_SIZE) {
+        if (first_time) table_map_page(user_kernel_ptable, paddr, paddr, kernel_mode);
+        dir_ins_table(pdir, paddr, user_kernel_ptable, kernel_mode);
+    }
+
+    dir_ins_table(pdir, 0, user_kernel_ptable, kernel_mode);
+
+    // Map the video memory from 0xB8000 to 0xB8FFF.
+    int mode = user_mode;
+    mode |= PE_PCD; 
+    if (first_time) table_map_page(user_kernel_ptable, (uint32_t)VGA_TEXT_PADDR, (uint32_t)VGA_TEXT_PADDR, mode);
+    dir_ins_table(pdir, VGA_TEXT_PADDR, user_kernel_ptable, mode);
+}
+
+
 
 
 /* === Kernel and process setup === */
@@ -736,6 +772,7 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
     uint32_t kernel_mode = PE_P | PE_RW; // Access mode for kernel pages.
 
     uint32_t *kernel_ptable = allocate_page();
+
 
     // Conditionally apply the PE_INFO_PINNED flag depending on the pid of the process
     uint32_t kernel_page_info_flags = PE_INFO_PINNED;
@@ -765,7 +802,6 @@ static void setup_kernel_vmem_common(pcb_t *pcb, uint32_t *pdir, int is_user)
     dir_ins_table(pdir, VGA_TEXT_PADDR, kernel_ptable, mode);
 }
 
-
 static void setup_kernel_vmem(void)
 {
     lock_acquire(&page_map_lock);
@@ -777,6 +813,12 @@ static void setup_kernel_vmem(void)
     );
     inc_pinned_pages(1);
     setup_kernel_vmem_common(dummy_kernel_pcb, kernel_pdir, 0);
+
+    user_kernel_ptable = allocate_page();
+    uint32_t kernel_page_info_flags = PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY;
+    insert_page_frame_info(user_kernel_ptable, user_kernel_ptable, dummy_kernel_pcb, kernel_page_info_flags);
+    inc_pinned_pages(1); 
+
     lock_release(&page_map_lock);
 }
 
@@ -792,25 +834,23 @@ void setup_process_vmem(pcb_t *p)
         return;
     }
 
+    uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
+    uint32_t *proc_pdir = allocate_page();
+    insert_page_frame_info(proc_pdir, proc_pdir, p, base_page_info_flags); // Conditionally pin the page directory
+    uint32_t user_mode = PE_RW | PE_US;
 
     if (first_process) {
         nointerrupt_enter();
         first_process_pid = p -> pid;
         first_process = 0;
         nointerrupt_leave();
+        // Ensure the kernel's virtual address space is mapped into the process's space
+        user_setup_kernel_vmem(p, proc_pdir, 1);
+    } else {
+        user_setup_kernel_vmem(p, proc_pdir, 0);
     }
+    // setup_kernel_vmem_common(p, proc_pdir, 1);
 
-
-
-    uint32_t base_page_info_flags = PE_INFO_USER_MODE | PE_INFO_PINNED;
-
-    uint32_t *proc_pdir = allocate_page();
-    insert_page_frame_info(proc_pdir, proc_pdir, p, base_page_info_flags); // Conditionally pin the page directory
-
-    uint32_t user_mode = PE_RW | PE_US;
-
-    // Ensure the kernel's virtual address space is mapped into the process's space
-    setup_kernel_vmem_common(p, proc_pdir, 1);
 
     uint32_t *proc_ptable = allocate_page();
     insert_page_frame_info(proc_ptable, proc_ptable, p, base_page_info_flags); // pin the page table
@@ -833,25 +873,29 @@ void setup_process_vmem(pcb_t *p)
     uint32_t *stack_page, stack_vaddr;
     uint32_t stack_lim  = PROCESS_STACK_VADDR - USER_STACK_SIZE;
     uint32_t stack_base = PROCESS_STACK_VADDR;
+
     for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
         stack_page = allocate_page();
         insert_page_frame_info(
             stack_page, (uintptr_t *) stack_vaddr, p,
-            base_page_info_flags  // Apply the pinning flags consistently for stack pages
+            base_page_info_flags | PE_INFO_STACK  // Apply the pinning flags consistently for stack pages
         );
 
-        inc_pinned_pages(1);  
+        inc_pinned_pages(1);     // Allocate pages for the stack area assuming a fixed size stack area for each process
 
         pr_debug(
             "allocated a stack frame with vaddr=%x at paddr %x, proceeding to map \n",
             (uint32_t) stack_vaddr, (uint32_t) stack_page
         );
-        table_map_page(
-            proc_ptable, stack_vaddr, (uint32_t) stack_page,
-            user_mode | PE_P | PE_INFO_PINNED 
-        );
-        dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P| PE_INFO_PINNED );
-    }
+        table_map_page(proc_ptable, stack_vaddr, (uint32_t) stack_page, user_mode | PE_P);
+        dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P);
+        
+    } 
+
+    // table_map_page(proc_ptable, stack_vaddr, (uint32_t) stack_page, user_mode | PE_P);
+    // dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P);
+    // table_map_page(stack_page_table, stack_vaddr, (uint32_t) stack_page, user_mode | PE_P);
+    // dir_ins_table(proc_pdir, stack_vaddr, stack_page_table, user_mode | PE_P);
 
     p->page_directory = proc_pdir;
     pr_debug("setup_process_vmem: done setup for process pid %u\n", p->pid);
@@ -1125,9 +1169,9 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     }
 
     int success = -1;
-    //lock_acquire(&page_map_lock);
+    lock_acquire(&page_map_lock);
     frameref = allocate_page();
-    //lock_release(&page_map_lock);
+    lock_release(&page_map_lock);
 
     if (!frameref) {
         nointerrupt_enter();
@@ -1138,7 +1182,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         success = disk_loader(disk_loc, block_count, frameref);
     }
 
-    //lock_acquire(&page_map_lock);
+    lock_acquire(&page_map_lock);
     frameref_table = get_page_table(vaddr, fault_dir);
     if (frameref_table == NULL) {
         frameref_table = allocate_page();
@@ -1160,7 +1204,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
     set_page_directory(pcb->page_directory);
-    //lock_release(&page_map_lock);
+    lock_release(&page_map_lock);
 
     nointerrupt_enter();
     pr_log("load_page_from_disk: Loaded page at virtual address 0x%08x with disk offset 0x%08x = %u from disk into physical address 0x%08x for pid = %u\n",
@@ -1358,11 +1402,11 @@ void page_fault_handler(struct interrupt_frame *stack_frame, ureg_t error_code)
 
         nointerrupt_leave();
 
-        //lock_acquire(&page_fault_debug_lock);
-        lock_acquire(&page_map_lock);
+        lock_acquire(&page_fault_debug_lock);
+        //lock_acquire(&page_map_lock);
         int success = load_page_from_disk((uint32_t) fault_address, fault_pcb);
-        lock_release(&page_map_lock);
-        //lock_release(&page_fault_debug_lock);
+        //lock_release(&page_map_lock);
+        lock_release(&page_fault_debug_lock);
 
         nointerrupt_enter();
         if (success >= 0) {

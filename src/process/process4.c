@@ -110,7 +110,7 @@ int main(void)
         if (m->size != size) {
             tprintf(&term, ANSIF_CUP, 1, 1);
             //tprintf(&term, "Error    \nBad data");
-            tprintf(&term, "Ex.size %d, got %d\n", size, m->size);
+            tprintf(&term, "Ex.size %d, \n got %d", size, m->size);
             tprintf(&term, ANSIF_EL, ANSI_EFWD); // Clear right
             exit();
         }
@@ -119,7 +119,7 @@ int main(void)
             if (m->body[j] != c) {
                 tprintf(&term, ANSIF_CUP, 1, 1);
                 //tprintf(&term, "Error    \nBad data");
-                tprintf(&term, "Mismatch at %d, expected %c, got %c\n", j, c, m->body[j]);
+                tprintf(&term, "Mismatch at %d, \n expected %c, got %c", j, c, m->body[j]);
                 tprintf(&term, ANSIF_EL, ANSI_EFWD); // Clear right
                 exit();
             }
