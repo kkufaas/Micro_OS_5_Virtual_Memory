@@ -782,10 +782,6 @@ static void setup_kernel_vmem(void)
 
 void setup_process_vmem(pcb_t *p)
 {
-
-    
-
-
     lock_acquire(&page_map_lock);
     pr_log("setup_process_vmem: setting up new process memory with pid: %u\n", p->pid);
 
@@ -852,9 +848,9 @@ void setup_process_vmem(pcb_t *p)
         );
         table_map_page(
             proc_ptable, stack_vaddr, (uint32_t) stack_page,
-            user_mode | PE_P
+            user_mode | PE_P | PE_INFO_PINNED 
         );
-        dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P);
+        dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P| PE_INFO_PINNED );
     }
 
     p->page_directory = proc_pdir;

@@ -11,7 +11,6 @@
 #include <syslib/common.h>
 #include <syslib/screenpos.h>
 #include <util/util.h>
-
 #include "syslib.h"
 
 static struct term term = PROC4_TERM_INIT;
@@ -110,7 +109,8 @@ int main(void)
          */
         if (m->size != size) {
             tprintf(&term, ANSIF_CUP, 1, 1);
-            tprintf(&term, "Error    \nBad data");
+            //tprintf(&term, "Error    \nBad data");
+            tprintf(&term, "Ex.size %d, got %d\n", size, m->size);
             tprintf(&term, ANSIF_EL, ANSI_EFWD); // Clear right
             exit();
         }
@@ -118,7 +118,8 @@ int main(void)
         for (j = 0; j < size; j++)
             if (m->body[j] != c) {
                 tprintf(&term, ANSIF_CUP, 1, 1);
-                tprintf(&term, "Error    \nBad data");
+                //tprintf(&term, "Error    \nBad data");
+                tprintf(&term, "Mismatch at %d, expected %c, got %c\n", j, c, m->body[j]);
                 tprintf(&term, ANSIF_EL, ANSI_EFWD); // Clear right
                 exit();
             }
