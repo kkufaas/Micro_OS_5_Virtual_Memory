@@ -34,8 +34,8 @@
 
 #define UNUSED(x)   ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
-// #define KERNEL_SIZE        0x300000 // 3 MB in hexadecimal
-#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
+#define KERNEL_SIZE        0x400000 // 3 MB in hexadecimal
+//#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
 //#define KERNEL_SIZE PAGING_AREA_MIN_PADDR + 1
 
 // #define KERNEL_SIZE 640 * 1024

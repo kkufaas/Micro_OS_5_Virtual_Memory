@@ -35,7 +35,7 @@
 // a percentage of the size of the images loaded to memory. The idea is to
 // keep competition for page frames at tolerable level to avoid thrashing.
 #define AVERAGE_PAGES_PER_PROCESS 7
-#define NEW_PROCESS_WAIT_TIME_FOR_PAGES 800 // millisecs
+#define NEW_PROCESS_WAIT_TIME_FOR_PAGES 1000 // millisecs
 
 
 lock_t load_process_lock_debug = LOCK_INIT;
@@ -279,17 +279,18 @@ int create_thread(uintptr_t start_addr)
     queue_insert(&current_running, p);
     return 0;
 }
+
 static uint32_t first_process = 1;
+static uint32_t wait_load = 0;
 /*
  * Allocate and set up the pcb for a new process, allocate resources
  * for it and insert it into the ready queue.
  */
+
 int create_process(uint32_t location, uint32_t size)
 {
 
     lock_acquire(&load_process_lock_debug);
-    msleep(1000 + (rand() % 1000));
-    // nointerrupt_enter();
     if (first_process) {
         // initialize running_processes
         running_processes = 0;
@@ -304,8 +305,14 @@ int create_process(uint32_t location, uint32_t size)
         pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
         pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
         page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+        wait_load = 1;
         msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
     }
+    // wait a random time to load a process that was put to sleep
+    if (wait_load) {
+        msleep(245 + (rand() % 420));
+    }
+
     running_processes += 1;
     nointerrupt_enter();
     pr_debug("loading process at location %u with size %u\n", location, size);
