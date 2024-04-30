@@ -858,8 +858,6 @@ void setup_process_vmem(pcb_t *p)
     lock_release(&page_map_lock);
 }
 
-
-
 /*
  * init_memory()
  *
