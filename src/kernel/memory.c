@@ -55,7 +55,7 @@ enum {
 
 #define EVICTION_STRATEGY EVICTION_STRATEGY_FIFO
 //#define EVICTION_STRATEGY EVICTION_STRATEGY_RANDOM
-#define USERS_SHARE_KERNEL_PAGE_TABLE 0
+#define USERS_SHARE_KERNEL_PAGE_TABLE 1
 
 static uint32_t first_process = 1;
 static uint32_t first_process_pid;
