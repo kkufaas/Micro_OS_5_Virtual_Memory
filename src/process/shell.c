@@ -45,7 +45,7 @@ int cursor = 0;
 int main(void)
 {
     int                 q, p, n;
-    int                 rc;
+    int                 rc, load_code;
     unsigned char       buf[SECTOR_SIZE]; /* directory buffer */
     struct directory_t *dir = (struct directory_t *) buf;
     int                 argc;              /* argument count */
@@ -146,8 +146,10 @@ int main(void)
                     ;
 
                 if (dir->location != 0) {
-                    loadproc(dir->location, dir->size);
-                    shprintf("Done.\n");
+                    load_code = loadproc(dir->location, dir->size);
+                    if (load_code == 0) shprintf("Done.\n");
+                    else if (load_code == 1) shprintf("Too much competition for pages. Try again later.\n");
+                    else shprintf("error");
                 } else {
                     shprintf("File not found.\n");
                 }

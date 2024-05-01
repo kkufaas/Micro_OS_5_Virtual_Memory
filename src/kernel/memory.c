@@ -34,8 +34,8 @@
 
 #define UNUSED(x)   ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
-//#define KERNEL_SIZE        0x400000 // 3 MB in hexadecimal
-#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
+#define KERNEL_SIZE        0x400000 // 3 MB in hexadecimal
+//#define KERNEL_SIZE        0x200000 // 2 MB in hexadecimal
 //#define KERNEL_SIZE PAGING_AREA_MIN_PADDR + 1
 
 // #define KERNEL_SIZE 640 * 1024
@@ -48,6 +48,12 @@
 #define MIN(x, y) (x < y ? x : y)
 
 #define PIN_SHELL 0
+enum {
+    EVICTION_STRATEGY_FIFO = 1,
+    EVICTION_STRATEGY_RANDOM = 2,
+};
+#define EVICTION_STRATEGY EVICTION_STRATEGY_FIFO
+
 static uint32_t first_process = 1;
 static uint32_t first_process_pid;
 
@@ -70,6 +76,7 @@ static spinlock_t next_free_mem_lock   = SPINLOCK_INIT;
 
 /* === Page allocation tracking === */
 static lock_t page_map_lock = LOCK_INIT;
+static spinlock_t page_frame_info_lock = SPINLOCK_INIT;
 
 inline uint32_t get_table_index(uint32_t vaddr);
 uint32_t       *get_page_table(uint32_t vaddr, uint32_t *page_directory);
@@ -327,6 +334,7 @@ bool fifo_enqueue(uint32_t item)
 
 uint32_t fifo_dequeue(int *error)
 {
+    pr_log("fifo_dequeue: fifo_queue.items = %u\n", fifo_queue.items);
     if (fifo_is_empty()) {
         *error = 1; // Indicates queue is empty
     }
@@ -350,7 +358,7 @@ void fifo_enqueue_info(uint32_t *paddr)
 
 uint32_t *fifo_dequeue_info(int *error)
 {
-    uint32_t fifo_index        = fifo_dequeue(error);
+    uint32_t fifo_index = fifo_dequeue(error);
     if (error) {
         return NULL;
     }
@@ -874,13 +882,15 @@ void setup_process_vmem(pcb_t *p)
     uint32_t stack_lim  = PROCESS_STACK_VADDR - USER_STACK_SIZE;
     uint32_t stack_base = PROCESS_STACK_VADDR;
 
+    //uint32_t *stack_page_table = allocate_page();
+    //insert_page_frame_info(stack_page_table, stack_page_table, p, base_page_info_flags | PE_INFO_STACK);
+    //inc_pinned_pages(1);
     for (stack_vaddr = stack_base; stack_vaddr > stack_lim; stack_vaddr -= PAGE_SIZE) {
         stack_page = allocate_page();
         insert_page_frame_info(
             stack_page, (uintptr_t *) stack_vaddr, p,
             base_page_info_flags | PE_INFO_STACK  // Apply the pinning flags consistently for stack pages
         );
-
         inc_pinned_pages(1);     // Allocate pages for the stack area assuming a fixed size stack area for each process
 
         pr_debug(
@@ -889,6 +899,8 @@ void setup_process_vmem(pcb_t *p)
         );
         table_map_page(proc_ptable, stack_vaddr, (uint32_t) stack_page, user_mode | PE_P);
         dir_ins_table(proc_pdir, stack_vaddr, proc_ptable, user_mode | PE_P);
+        //table_map_page(stack_page_table, stack_vaddr, (uint32_t) stack_page, user_mode | PE_P);
+        //dir_ins_table(proc_pdir, stack_vaddr, stack_page_table, user_mode | PE_P);
         
     } 
 
@@ -964,9 +976,9 @@ uint32_t *select_page_for_eviction_v1()
         abortk();
     }
 
-    //spinlock_acquire(&page_frame_info_lock);
+    spinlock_acquire(&page_frame_info_lock);
     uint32_t *paddr = page_frame_info[index].paddr;
-    //spinlock_release(&page_frame_info_lock);
+    spinlock_release(&page_frame_info_lock);
 
     if (paddr == NULL) {
         pr_error(
@@ -983,10 +995,35 @@ uint32_t *select_page_for_eviction_v1()
     return paddr;
 }
 
+
+static uint32_t random_index_val = 45;
+/* modfied from precode rand*/
+int random_index_generator(void)
+{
+    random_index_val = random_index_val * 1103515245 + 12345 + (read_cpu_ticks() % 2397);
+    return (random_index_val / 65536) % PAGEABLE_PAGES;
+}
+
+
+uint32_t *evict_random_page()
+{
+    uint32_t index = random_index_generator();
+    while (page_frame_info[index].info_mode & PE_INFO_PINNED) {
+        index = random_index_generator();
+    }
+    return page_frame_info[index].paddr;
+}
+
+
+
 uint32_t *select_page_for_eviction()
 {
-    return select_page_for_eviction_v1();
-    //return select_page_for_eviction_v2();
+    if (EVICTION_STRATEGY == EVICTION_STRATEGY_RANDOM) {
+        return evict_random_page();
+    } else if (EVICTION_STRATEGY == EVICTION_STRATEGY_FIFO) {
+        return select_page_for_eviction_v1();
+        //return select_page_for_eviction_v2();
+    }
 }
 
 
@@ -1069,23 +1106,25 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
          );
          return -1;
     }
-    uint32_t *frameref = (uint32_t *) (frameref_table[get_table_index(vaddr)] & PE_BASE_ADDR_MASK);
-    for (int i=0; i < PAGE_SIZE; i++) write_buffer[i] = frameref[i];
-    nointerrupt_enter();
-    bcopy((char *) frameref, write_buffer, PAGE_SIZE);
-    nointerrupt_leave();
-    lock_acquire(&write_buffer_lock);
-    success = scsi_write(disk_loc, write_block_count, write_buffer);
-    lock_release(&write_buffer_lock);
+    //uint32_t *frameref = (uint32_t *) (frameref_table[get_table_index(vaddr)] & PE_BASE_ADDR_MASK);
+    char *frameref = (char*) (frameref_table[get_table_index(vaddr)] & PE_BASE_ADDR_MASK);
+    //for (int i=0; i < PAGE_SIZE; i++) write_buffer[i] = frameref[i];
+    //lock_acquire(&write_buffer_lock);
+    //nointerrupt_enter();
+    //bcopy((char *) frameref, write_buffer, PAGE_SIZE);
+    //nointerrupt_leave();
+    //success = scsi_write(disk_loc, write_block_count, write_buffer);
+    //success = scsi_write(disk_loc, write_block_count, frameref);
+    //lock_release(&write_buffer_lock);
 
-    // success = scsi_write(disk_loc, write_block_count, (char *) frameref);
+    //success = scsi_write(disk_loc, write_block_count, (char *) frameref);
 
     // for(int i=0; i < PAGE_SIZE; i++) write_buffer[i] = paddr[i];
     // nointerrupt_enter();
     // bcopy((char *) paddr, write_buffer, PAGE_SIZE);
     // nointerrupt_leave();
     // success = scsi_write(disk_loc, write_block_count, write_buffer);
-    // success = scsi_write(disk_loc, write_block_count, (char *) paddr);
+    success = scsi_write(disk_loc, write_block_count, (char *) paddr);
     
     /* clang-format off */
     pr_log( "write_page_back_to_disk: Page at virtual address 0x%08x referencing frame %0x08x written back to disk at offset 0x%08x = %u for pid %u\n", 
@@ -1148,9 +1187,11 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     // Determine the number of sectors to read, ensuring not to exceed file boundaries
     block_count = MIN(PAGE_SIZE / SECTOR_SIZE, pcb->swap_size - disk_offset);
 
-    nointerrupt_enter();
-    load_page_pr_log(pcb->pid, (void *) vaddr, disk_offset, pcb->swap_size);
-    nointerrupt_leave();
+    if (MEMDEBUG) {
+        nointerrupt_enter();
+        load_page_pr_log(pcb->pid, (void *) vaddr, disk_offset, pcb->swap_size);
+        nointerrupt_leave();
+    }
 
     mode = PE_P | PE_RW | PE_US;
     if (pcb->is_thread) {
@@ -1197,7 +1238,7 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
         return success;
     }
 
-    if ( !(info_mode & PE_INFO_PINNED) ) {
+    if ( !(info_mode & PE_INFO_PINNED) && EVICTION_STRATEGY == EVICTION_STRATEGY_FIFO) {
         fifo_enqueue_info(frameref);
     }
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode); 

@@ -300,19 +300,24 @@ int create_process(uint32_t location, uint32_t size)
 
     // rough estimate - can be improved upon by using eg. p->swap_size for each
     // process to estimate the number of pages used
-
-    // uint32_t page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
-    // while(page_space_available < AVERAGE_PAGES_PER_PROCESS + 1) {
-    //     pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
-    //     pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
-    //     page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
-    //     wait_load = 1;
-    //     msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
-    // }
-    // // wait a random time to load a process that was put to sleep
-    // if (wait_load) {
-    //     msleep(245 + (rand() % 420));
-    // }
+    uint32_t wait_counter = 0;
+    uint32_t page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+    while(page_space_available < AVERAGE_PAGES_PER_PROCESS + 1) {
+        pr_debug("create_process: too much competition for pages: sleeping while others finish\n");
+        pr_debug("create_process: too much competition for pages: currently %u processes running\n", running_processes);
+        page_space_available = PAGEABLE_PAGES - running_processes*AVERAGE_PAGES_PER_PROCESS;
+        wait_load = 1;
+        msleep(NEW_PROCESS_WAIT_TIME_FOR_PAGES);
+        wait_counter++;
+        if (wait_counter*NEW_PROCESS_WAIT_TIME_FOR_PAGES > 2000) {
+            lock_release(&load_process_lock_debug);
+            return 1;
+        }
+    }
+    // wait a random time to load a process that was put to sleep
+    if (wait_load) {
+        msleep(245 + (rand() % 420));
+    }
 
     running_processes += 1;
     nointerrupt_enter();
