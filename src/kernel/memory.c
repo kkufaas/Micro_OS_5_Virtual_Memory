@@ -479,51 +479,51 @@ void page_free(uintptr_t *paddr, int evict)
 
 // current bug: locks cause process to skip scheduler entry or return from it
 // solution is probably to use a cleaner thread/daemon like suggested in Tanenbaum MOS.
-void free_done_process_memory(pcb_t *p) 
-{
-    // uint32_t table_index, dir_index, vaddr, *table;
-    // uint32_t dir_entry, table_entry, old_mode;
-    // // the quick and dirty way - linear search through entire pageable area,
-    // // mark all pages belonging to this process as not pinned.
-    // lock_acquire(&page_map_lock);
-    // for (int i=0; i < PAGEABLE_PAGES; i++) {
-    //     if (page_frame_info[i].owner == p) {
-
-    //         
-    //         // slight modification of page_set_mode to instead just clear dirty  bit,
-    //         // because we don't want to write pages of finished processes to disc.
-    //         // #################################################################
-    //         // vaddr = (uint32_t) page_frame_info[i].vaddr;
-    //         // dir_index = get_directory_index(vaddr);
-    //         // table_index = get_table_index((uint32_t) vaddr);
-
-    //         // // table_index = get_table_index(vaddr);
-    //         // // table = p -> page_directory[dir_index] & PE_BASE_ADDR_MASK;
-
-    //         // dir_entry = p->page_directory[dir_index];
-    //         // assertk(dir_entry & PE_P); /* dir entry present */
-    //         // table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
-    //         // table_entry = table[table_index];
-
-    //         // /* set table[index] bits 11..0 */
-    //         // old_mode = table_entry & PE_BASE_ADDR_MASK;
-    //         // table_entry |= (old_mode & ~(PE_D)) & ~PE_BASE_ADDR_MASK;
-    //         // table[table_index] = table_entry;
-    //         // // #################################################################
-
-
-    //         // put pinned pages to the fifo-queue so that they become available
-    //         // for paging/swapping.
-    //         if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
-    //             fifo_enqueue(i);
-    //             page_frame_info[i].info_mode &=~(PE_INFO_PINNED);
-    //         }
-    //         // unpin the page frame, page fault handler can now swap it when added to the fifo queue
-    //         //page_frame_info[i].info_mode &=~(PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY | PE_INFO_USER_MODE);
-    //     }
-    // }
-    // lock_release(&page_map_lock);
-}
+// void free_done_process_memory(pcb_t *p) 
+// {
+//     // uint32_t table_index, dir_index, vaddr, *table;
+//     // uint32_t dir_entry, table_entry, old_mode;
+//     // // the quick and dirty way - linear search through entire pageable area,
+//     // // mark all pages belonging to this process as not pinned.
+//     // lock_acquire(&page_map_lock);
+//     // for (int i=0; i < PAGEABLE_PAGES; i++) {
+//     //     if (page_frame_info[i].owner == p) {
+// 
+//     //         
+//     //         // slight modification of page_set_mode to instead just clear dirty  bit,
+//     //         // because we don't want to write pages of finished processes to disc.
+//     //         // #################################################################
+//     //         // vaddr = (uint32_t) page_frame_info[i].vaddr;
+//     //         // dir_index = get_directory_index(vaddr);
+//     //         // table_index = get_table_index((uint32_t) vaddr);
+// 
+//     //         // // table_index = get_table_index(vaddr);
+//     //         // // table = p -> page_directory[dir_index] & PE_BASE_ADDR_MASK;
+// 
+//     //         // dir_entry = p->page_directory[dir_index];
+//     //         // assertk(dir_entry & PE_P); /* dir entry present */
+//     //         // table = (uint32_t *) (dir_entry & PE_BASE_ADDR_MASK);
+//     //         // table_entry = table[table_index];
+// 
+//     //         // /* set table[index] bits 11..0 */
+//     //         // old_mode = table_entry & PE_BASE_ADDR_MASK;
+//     //         // table_entry |= (old_mode & ~(PE_D)) & ~PE_BASE_ADDR_MASK;
+//     //         // table[table_index] = table_entry;
+//     //         // // #################################################################
+// 
+// 
+//     //         // put pinned pages to the fifo-queue so that they become available
+//     //         // for paging/swapping.
+//     //         if (page_frame_info[i].info_mode & PE_INFO_PINNED) {
+//     //             fifo_enqueue(i);
+//     //             page_frame_info[i].info_mode &=~(PE_INFO_PINNED);
+//     //         }
+//     //         // unpin the page frame, page fault handler can now swap it when added to the fifo queue
+//     //         //page_frame_info[i].info_mode &=~(PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY | PE_INFO_USER_MODE);
+//     //     }
+//     // }
+//     // lock_release(&page_map_lock);
+// }
 
 
 void free_memory(uint32_t ptr)
@@ -743,7 +743,7 @@ void print_fifo_queue()
 
 uint32_t* user_kernel_ptable;
 
-static void user_setup_kernel_vmem(pcb_t *pcb, uint32_t *pdir, int first_time)
+static void user_setup_kernel_vmem(uint32_t *pdir, int first_time)
 {
     uint32_t user_mode = PE_P | PE_RW | PE_US; // Access mode for user pages.
     uint32_t kernel_mode = PE_P | PE_RW; // Access mode for kernel pages.
@@ -855,9 +855,9 @@ void setup_process_vmem(pcb_t *p)
         first_process = 0;
         nointerrupt_leave();
         // Ensure the kernel's virtual address space is mapped into the process's space
-        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 1);
+        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(proc_pdir, 1);
     } else {
-        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 0);
+        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(proc_pdir, 0);
     }
     if (!PROCESSES_SHARE_KERNEL_PAGE_TABLE) setup_kernel_vmem_common(p, proc_pdir, 1);
 
