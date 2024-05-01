@@ -297,6 +297,11 @@ int create_process(uint32_t location, uint32_t size)
         first_process = 0;
     }
 
+    // this is a workaround for high paging activity causes the mailbox processes
+    // to get bad data. Most likely due to a bug in our code. Nevertheless a
+    // feature like this can increase system throughput a lot by 'scheduling'
+    // process launching and avoids thrashing.
+    //////////////////////////////////////////////////////////////////////////////
 
     // rough estimate - can be improved upon by using eg. p->swap_size for each
     // process to estimate the number of pages used
@@ -317,7 +322,9 @@ int create_process(uint32_t location, uint32_t size)
     // wait a random time to load a process that was put to sleep
     if (wait_load) {
         msleep(245 + (rand() % 420));
+        wait_load = 0;
     }
+    //////////////////////////////////////////////////////////////////////////////
 
     running_processes += 1;
     nointerrupt_enter();
