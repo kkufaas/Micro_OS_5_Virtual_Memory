@@ -41,7 +41,7 @@
 // some memory settings
 ////////////////////////////////////////////////////////////////////////////////////////
 #define PROCESSES_SHARE_KERNEL_PAGE_TABLE 1
-#define PIN_SHELL 0
+#define PIN_SHELL 1
 
 enum {
     EVICTION_STRATEGY_FIFO = 1,
