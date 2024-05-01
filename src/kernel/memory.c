@@ -1270,7 +1270,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
 
     invalidate_page((uintptr_t *) vaddr);
-    set_page_directory(pcb->page_directory);
+    //////set_page_directory(pcb->page_directory); // caused the bad data bug together with not
+    // having the page invalidation
     //lock_release(&page_map_lock);
 
     nointerrupt_enter();
