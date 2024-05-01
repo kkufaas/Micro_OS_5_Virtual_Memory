@@ -30,7 +30,7 @@
 #include "sync.h"
 #include "usb/scsi.h"
 
-
+#include "config.h"
 
 #define UNUSED(x)   ((void) x)
 //#define KERNEL_SIZE 0x400000 // 4 MB in hexadecimal
@@ -47,15 +47,15 @@
 
 #define MIN(x, y) (x < y ? x : y)
 
-#define PIN_SHELL 0
-enum {
-    EVICTION_STRATEGY_FIFO = 1,
-    EVICTION_STRATEGY_RANDOM = 2,
-};
-
-#define EVICTION_STRATEGY EVICTION_STRATEGY_FIFO
-//#define EVICTION_STRATEGY EVICTION_STRATEGY_RANDOM
-#define USERS_SHARE_KERNEL_PAGE_TABLE 1
+// #define PIN_SHELL 0
+// enum {
+//     EVICTION_STRATEGY_FIFO = 1,
+//     EVICTION_STRATEGY_RANDOM = 2,
+// };
+// 
+// #define EVICTION_STRATEGY EVICTION_STRATEGY_FIFO
+// #define EVICTION_STRATEGY EVICTION_STRATEGY_RANDOM
+// #define USERS_SHARE_KERNEL_PAGE_TABLE 1
 
 static uint32_t first_process = 1;
 static uint32_t first_process_pid;
