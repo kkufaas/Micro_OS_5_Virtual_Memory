@@ -41,7 +41,7 @@
 // some memory settings
 ////////////////////////////////////////////////////////////////////////////////////////
 #define PROCESSES_SHARE_KERNEL_PAGE_TABLE 1
-#define PIN_SHELL 1
+#define PIN_SHELL 0
 
 enum {
     EVICTION_STRATEGY_FIFO = 1,
@@ -66,7 +66,7 @@ enum {
 // keep competition for page frames at tolerable level to avoid thrashing.
 
 // limits the number of running processes if set to 1
-#define SCHEDULE_PROCESS_LAUNCHING 1
+#define SCHEDULE_PROCESS_LAUNCHING 0
 
 #define AVERAGE_PAGES_PER_PROCESS 7
 #define NEW_PROCESS_WAIT_TIME_FOR_PAGES 1000 // millisecs

@@ -458,6 +458,7 @@ void page_free(uintptr_t *paddr, int evict)
 
         nointerrupt_enter();
         if (evict) {
+            // unmaps the page and invalidates it
             unmap_physical_page(info_frame->owner->page_directory, vaddr);
         } else {
             //spinlock_acquire(&page_frame_info_lock);
@@ -603,8 +604,8 @@ static inline void page_set_mode(uint32_t *pdir, uint32_t vaddr, uint32_t mode)
     entry |= mode & ~PE_BASE_ADDR_MASK;
     table[index] = entry;
     /* Flush TLB */
-    // original: invalidate_page((uint32_t *) vaddr);
-    if (pdir == current_running -> page_directory) invalidate_page((uint32_t *) vaddr);
+    invalidate_page((uint32_t *) vaddr);
+    //if (pdir == current_running -> page_directory) invalidate_page((uint32_t *) vaddr);
 }
 
 /* Debug-function.
@@ -1023,12 +1024,17 @@ uint32_t *evict_random_page()
 
 uint32_t *select_page_for_eviction()
 {
+    uint32_t* evicted_page;
     if (EVICTION_STRATEGY == EVICTION_STRATEGY_RANDOM) {
-        return evict_random_page();
+        evicted_page = evict_random_page();
     } else if (EVICTION_STRATEGY == EVICTION_STRATEGY_FIFO) {
-        return select_page_for_eviction_v1();
+        evicted_page = select_page_for_eviction_v1();
         //return select_page_for_eviction_v2();
     }
+    if (page_frame_info[calculate_info_index(evicted_page)].owner) {
+        invalidate_page(page_frame_info[calculate_info_index(evicted_page)].vaddr);
+    }
+    return evicted_page;
 }
 
 
@@ -1133,7 +1139,8 @@ int write_page_back_to_disk(uint32_t vaddr, pcb_t *pcb, uint32_t* paddr)
     
     lock_acquire(&write_buffer_lock);
     success = scsi_write(disk_loc, write_block_count, (char *) paddr);
-    if (pcb == current_running) invalidate_page((uintptr_t *)vaddr);
+    //if (pcb == current_running) invalidate_page((uintptr_t *)vaddr);
+    invalidate_page((uintptr_t *)vaddr);
     lock_release(&write_buffer_lock);
     
     /* clang-format off */
@@ -1261,6 +1268,8 @@ int load_page_from_disk(uint32_t vaddr, pcb_t *pcb)
     insert_page_frame_info(frameref, (uintptr_t *) vaddr, pcb, info_mode); 
     table_map_page(frameref_table, vaddr, (uint32_t) frameref, mode);
     dir_ins_table(fault_dir, vaddr, frameref_table, mode);
+
+    invalidate_page((uintptr_t *) vaddr);
     set_page_directory(pcb->page_directory);
     //lock_release(&page_map_lock);
 
