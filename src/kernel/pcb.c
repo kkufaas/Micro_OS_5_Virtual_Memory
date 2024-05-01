@@ -33,18 +33,6 @@
 #include "config.h"
 
 
-// three or four pinned pages depending on sharing strategy
-// pinned for stack, page directory and user space page table
-// kernel page table is either shared among processes or pinned, depending on strategy.
-// On average about three to four pages per process are required to avoid thrashing,
-// totaling about 7 pages per process.
-// This last number could be modeled better with. eg
-// a percentage of the size of the images loaded to memory. The idea is to
-// keep competition for page frames at tolerable level to avoid thrashing.
-
-// #define AVERAGE_PAGES_PER_PROCESS 7
-// #define NEW_PROCESS_WAIT_TIME_FOR_PAGES 1000 // millisecs
-// #define SCHEDULE_PROCESS_LAUNCHING 1
 
 
 lock_t load_process_lock_debug = LOCK_INIT;
