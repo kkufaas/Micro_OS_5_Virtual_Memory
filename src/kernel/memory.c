@@ -822,7 +822,7 @@ static void setup_kernel_vmem(void)
     inc_pinned_pages(1);
     setup_kernel_vmem_common(dummy_kernel_pcb, kernel_pdir, 0);
 
-    if (USERS_SHARE_KERNEL_PAGE_TABLE) {
+    if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) {
         user_kernel_ptable = allocate_page();
         uint32_t kernel_page_info_flags = PE_INFO_PINNED | PE_INFO_KERNEL_DUMMY;
         insert_page_frame_info(user_kernel_ptable, user_kernel_ptable, dummy_kernel_pcb, kernel_page_info_flags);
@@ -855,11 +855,11 @@ void setup_process_vmem(pcb_t *p)
         first_process = 0;
         nointerrupt_leave();
         // Ensure the kernel's virtual address space is mapped into the process's space
-        if (USERS_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 1);
+        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 1);
     } else {
-        if (USERS_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 0);
+        if (PROCESSES_SHARE_KERNEL_PAGE_TABLE) user_setup_kernel_vmem(p, proc_pdir, 0);
     }
-    if (!USERS_SHARE_KERNEL_PAGE_TABLE) setup_kernel_vmem_common(p, proc_pdir, 1);
+    if (!PROCESSES_SHARE_KERNEL_PAGE_TABLE) setup_kernel_vmem_common(p, proc_pdir, 1);
 
 
     uint32_t *proc_ptable = allocate_page();
