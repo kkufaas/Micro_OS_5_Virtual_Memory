@@ -62,6 +62,5 @@ uint32_t* allocate_page(void);
 void identity_map_page(uint32_t* table, uint32_t vaddr, uint32_t mode);
 
 
-void free_done_process_memory(pcb_t *p);
 
 #endif /* MEMORY_H */
