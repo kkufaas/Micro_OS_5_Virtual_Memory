@@ -2,32 +2,35 @@
  * These current settings provide a stable user interface.
  * 
  * -------------------------  unstable settings  ----------------------------------------
- * Unstable: dont limit number of processes
- * When users share kernel page tables, we can somtimes (often)
+ * Unstable: dont limit number of processes and let users share kernel page tables.
+ * Keep shell unpinned.
+ * with this setting, we can most times
  * run all 4 processes
  * simultaneously depending on launch order,
- * but cannot use the shell before one of them completes. 
+ * but extensive use of shell to e.g fire a missile from the plane
+ * may cause bad data. 
  * 
  * If we start running the plane (1), then 3, 4 and then 2 before 3 and 4 completes,
  * they we get a bad data error
  * Sometimes bad data have been observed in order 1, 2, 3, 4 as well.
  * 
- * With a FIFO strategy we are able pin the shell and
+ * With a FIFO strategy we are usually able to pin the shell and
  * launch all processes in order 1, 2, 3, 4 and use the shell commands, except
- * the fire command.
+ * the fire command without errors.
  * However, order 3, 1, 4, 2 (usually) gets a bad data error
  * 
  * Slightly unstable: limit number of processe but don't share kernel page tables
  * If processes don't share a kernel page table, one can run three processes at once
  * when not pinning the shell, but not use the shell to fire bullets from the plane.
- * shell commands like ls seem to work better.
+ * shell commands like ls seem to work better. One can use the shell sporadicially,
+ * but spamming eg fire may cause a bad data error.
  * --------------------------------------------------------------------------------------
  *
  * 
  *  
  * -------------------------  stable settings  ----------------------------------------
  * Stable: limit number of processes and have processes share page tables.
- * To see paging and swapping in action, spam 'fire' in the shell
+ * To see paging and swapping in action, spam 'fire' or other shell commands
  * --------------------------------------------------------------------------------------
 
  * As explained below, our system is sensitive to thrashing, which we think
@@ -52,7 +55,6 @@ enum {
 
 
 
-
 ///////////////////////////////////////////////////////////////////////////////////////
 // Shell behaviour
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -66,7 +68,7 @@ enum {
 // keep competition for page frames at tolerable level to avoid thrashing.
 
 // limits the number of running processes if set to 1
-#define SCHEDULE_PROCESS_LAUNCHING 0
+#define SCHEDULE_PROCESS_LAUNCHING 1
 
 #define AVERAGE_PAGES_PER_PROCESS 7
 #define NEW_PROCESS_WAIT_TIME_FOR_PAGES 1000 // millisecs
